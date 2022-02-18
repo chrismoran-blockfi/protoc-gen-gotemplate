@@ -2,8 +2,6 @@ module github.com/chrismoran-blockfi/protoc-gen-gotemplate
 
 go 1.17
 
-replace github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples v0.0.0 => ./examples
-
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/gobuffalo/packr/v2 v2.8.0
