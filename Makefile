@@ -1,5 +1,5 @@
-GOPKG ?= github.com/blockfi/protoc-gen-gotemplate
-DOCKER_IMAGE ?= blockfi/protoc-gen-gotemplate
+GOPKG ?= github.com/chrismoran-blockfi/protoc-gen-gotemplate
+DOCKER_IMAGE ?= chrismoran-blockfi/protoc-gen-gotemplate
 GOBINS ?= . ./cmd/web-editor
 GOLIBS ?= .
 

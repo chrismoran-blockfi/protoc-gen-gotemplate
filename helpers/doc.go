@@ -1,2 +1,2 @@
-// Package utilities provides members for internal use in grpc-gateway.
+// Package pgghelpers provides members for internal use in grpc-gateway.
 package pgghelpers
