@@ -6,5 +6,5 @@ import (
 )
 
 type Repository interface {
-	GetFoo(timestamp *timestamp.Timestamp) (*timestamp.Timestamp, error)
+	GetFoo(timestamp *timestamp.Timestamp) (string, error)
 }

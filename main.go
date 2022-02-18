@@ -1,4 +1,4 @@
-package main // import "moul.io/protoc-gen-gotemplate"
+package main // import "github.com/chrismoran-blockfi/protoc-gen-gotemplate"
 
 import (
 	"io/ioutil"
@@ -6,16 +6,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/protoc-gen-go/generator"
-	plugin_go "github.com/golang/protobuf/protoc-gen-go/plugin"
-	ggdescriptor "github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
+	"go-micro.dev/v4/cmd/protoc-gen-micro/generator"
+	"google.golang.org/protobuf/proto"
+	plugingo "google.golang.org/protobuf/types/pluginpb"
 
-	pgghelpers "moul.io/protoc-gen-gotemplate/helpers"
+	pgghelpers "github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
 )
 
 var (
-	registry *ggdescriptor.Registry // some helpers need access to registry
+	registry *pgghelpers.Registry
 )
 
 const (
@@ -100,8 +99,8 @@ func main() {
 		}
 	}
 
-	tmplMap := make(map[string]*plugin_go.CodeGeneratorResponse_File)
-	concatOrAppend := func(file *plugin_go.CodeGeneratorResponse_File) {
+	tmplMap := make(map[string]*plugingo.CodeGeneratorResponse_File)
+	concatOrAppend := func(file *plugingo.CodeGeneratorResponse_File) {
 		if val, ok := tmplMap[file.GetName()]; ok {
 			*val.Content += file.GetContent()
 		} else {
@@ -111,7 +110,7 @@ func main() {
 	}
 
 	if singlePackageMode {
-		registry = ggdescriptor.NewRegistry()
+		registry = pgghelpers.NewRegistry()
 		pgghelpers.SetRegistry(registry)
 		if err = registry.Load(g.Request); err != nil {
 			g.Error(err, "registry: failed to load the request")

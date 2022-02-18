@@ -4,9 +4,9 @@ import (
 	context "context"
 	"fmt"
 
+	pb "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/go-kit/services/sprint/gen/pb"
 	"github.com/go-kit/kit/endpoint"
 	oldcontext "golang.org/x/net/context"
-	pb "moul.io/protoc-gen-gotemplate/examples/go-kit/services/sprint/gen/pb"
 )
 
 var _ = endpoint.Chain

@@ -3,27 +3,28 @@ package pgghelpers
 import (
 	"encoding/json"
 	"fmt"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
-	"text/template"
+	tmpl "text/template"
 
 	"github.com/Masterminds/sprig"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/protoc-gen-go/descriptor"
-	ggdescriptor "github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
 	"github.com/huandu/xstrings"
 	options "google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
 var jsReservedRe = regexp.MustCompile(`(^|[^A-Za-z])(do|if|in|for|let|new|try|var|case|else|enum|eval|false|null|this|true|void|with|break|catch|class|const|super|throw|while|yield|delete|export|import|public|return|static|switch|typeof|default|extends|finally|package|private|continue|debugger|function|arguments|interface|protected|implements|instanceof)($|[^A-Za-z])`)
 
 var (
-	registry *ggdescriptor.Registry // some helpers need access to registry
+	registry *Registry // some helpers need access to registry
 )
 
-var ProtoHelpersFuncMap = template.FuncMap{
+var ProtoHelpersFuncMap = tmpl.FuncMap{
 	"string": func(i interface {
 		String() string
 	}) string {
@@ -126,6 +127,7 @@ var ProtoHelpersFuncMap = template.FuncMap{
 	"snakeCase":                    xstrings.ToSnakeCase,
 	"getProtoFile":                 getProtoFile,
 	"getMessageType":               getMessageType,
+	"getMessageTypeWithPackage":    getMessageTypeWithPackage,
 	"getEnumValue":                 getEnumValue,
 	"isFieldMessage":               isFieldMessage,
 	"isFieldMessageTimeStamp":      isFieldMessageTimeStamp,
@@ -214,7 +216,7 @@ func getStore(key string) interface{} {
 	return store.getData(key)
 }
 
-func SetRegistry(reg *ggdescriptor.Registry) {
+func SetRegistry(reg *Registry) {
 	registry = reg
 }
 
@@ -239,32 +241,32 @@ func addToPathMap(info *descriptor.SourceCodeInfo, i interface{}, path []int32) 
 	}
 	switch d := i.(type) {
 	case *descriptor.FileDescriptorProto:
-		for index, descriptor := range d.MessageType {
-			addToPathMap(info, descriptor, newPath(path, 4, index))
+		for index, descriptorProto := range d.MessageType {
+			addToPathMap(info, descriptorProto, newPath(path, 4, index))
 		}
-		for index, descriptor := range d.EnumType {
-			addToPathMap(info, descriptor, newPath(path, 5, index))
+		for index, descriptorProto := range d.EnumType {
+			addToPathMap(info, descriptorProto, newPath(path, 5, index))
 		}
-		for index, descriptor := range d.Service {
-			addToPathMap(info, descriptor, newPath(path, 6, index))
+		for index, descriptorProto := range d.Service {
+			addToPathMap(info, descriptorProto, newPath(path, 6, index))
 		}
 	case *descriptor.DescriptorProto:
-		for index, descriptor := range d.Field {
-			addToPathMap(info, descriptor, newPath(path, 2, index))
+		for index, descriptorProto := range d.Field {
+			addToPathMap(info, descriptorProto, newPath(path, 2, index))
 		}
-		for index, descriptor := range d.NestedType {
-			addToPathMap(info, descriptor, newPath(path, 3, index))
+		for index, descriptorProto := range d.NestedType {
+			addToPathMap(info, descriptorProto, newPath(path, 3, index))
 		}
-		for index, descriptor := range d.EnumType {
-			addToPathMap(info, descriptor, newPath(path, 4, index))
+		for index, descriptorProto := range d.EnumType {
+			addToPathMap(info, descriptorProto, newPath(path, 4, index))
 		}
 	case *descriptor.EnumDescriptorProto:
-		for index, descriptor := range d.Value {
-			addToPathMap(info, descriptor, newPath(path, 2, index))
+		for index, descriptorProto := range d.Value {
+			addToPathMap(info, descriptorProto, newPath(path, 2, index))
 		}
 	case *descriptor.ServiceDescriptorProto:
-		for index, descriptor := range d.Method {
-			addToPathMap(info, descriptor, newPath(path, 2, index))
+		for index, descriptorProto := range d.Method {
+			addToPathMap(info, descriptorProto, newPath(path, 2, index))
 		}
 	}
 }
@@ -328,22 +330,13 @@ func stringMethodOptionsExtension(fieldID int32, f *descriptor.MethodDescriptorP
 	if f.Options == nil {
 		return ""
 	}
-	var extendedType *descriptor.MethodOptions
-	var extensionType *string
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("bytes,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return ""
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return ""
 	}
@@ -368,22 +361,13 @@ func stringFileOptionsExtension(fieldID int32, f *descriptor.FileDescriptorProto
 	if f.Options == nil {
 		return ""
 	}
-	var extendedType *descriptor.FileOptions
-	var extensionType *string
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("bytes,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return ""
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return ""
 	}
@@ -403,22 +387,13 @@ func stringFieldExtension(fieldID int32, f *descriptor.FieldDescriptorProto) str
 	if f.Options == nil {
 		return ""
 	}
-	var extendedType *descriptor.FieldOptions
-	var extensionType *string
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("bytes,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return ""
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return ""
 	}
@@ -438,22 +413,13 @@ func int64FieldExtension(fieldID int32, f *descriptor.FieldDescriptorProto) int6
 	if f.Options == nil {
 		return 0
 	}
-	var extendedType *descriptor.FieldOptions
-	var extensionType *int64
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("varint,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return 0
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return 0
 	}
@@ -473,22 +439,13 @@ func int64MessageExtension(fieldID int32, f *descriptor.DescriptorProto) int64 {
 	if f.Options == nil {
 		return 0
 	}
-	var extendedType *descriptor.MessageOptions
-	var extensionType *int64
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("varint,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return 0
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return 0
 	}
@@ -508,22 +465,13 @@ func stringMessageExtension(fieldID int32, f *descriptor.DescriptorProto) string
 	if f.Options == nil {
 		return ""
 	}
-	var extendedType *descriptor.MessageOptions
-	var extensionType *string
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("bytes,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return ""
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return ""
 	}
@@ -543,22 +491,13 @@ func boolMethodOptionsExtension(fieldID int32, f *descriptor.MethodDescriptorPro
 	if f.Options == nil {
 		return false
 	}
-	var extendedType *descriptor.MethodOptions
-	var extensionType *bool
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("varint,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return false
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return false
 	}
@@ -578,22 +517,13 @@ func boolFieldExtension(fieldID int32, f *descriptor.FieldDescriptorProto) bool 
 	if f.Options == nil {
 		return false
 	}
-	var extendedType *descriptor.FieldOptions
-	var extensionType *bool
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("varint,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return false
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return false
 	}
@@ -613,22 +543,13 @@ func boolMessageExtension(fieldID int32, f *descriptor.DescriptorProto) bool {
 	if f.Options == nil {
 		return false
 	}
-	var extendedType *descriptor.MessageOptions
-	var extensionType *bool
 
-	eds := proto.RegisteredExtensions(f.Options)
-	if eds[fieldID] == nil {
-		ed := &proto.ExtensionDesc{
-			ExtendedType:  extendedType,
-			ExtensionType: extensionType,
-			Field:         fieldID,
-			Tag:           fmt.Sprintf("varint,%d", fieldID),
-		}
-		proto.RegisterExtension(ed)
-		eds = proto.RegisteredExtensions(f.Options)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(f.Options), protoreflect.FieldNumber(fieldID))
+	if eType == nil && err == protoregistry.NotFound {
+		return false
 	}
 
-	ext, err := proto.GetExtension(f.Options, eds[fieldID])
+	ext := proto.GetExtension(f.Options, eType)
 	if err != nil {
 		return false
 	}
@@ -647,7 +568,7 @@ func init() {
 	}
 }
 
-func getProtoFile(name string) *ggdescriptor.File {
+func getProtoFile(name string) *File {
 	if registry == nil {
 		return nil
 	}
@@ -658,7 +579,7 @@ func getProtoFile(name string) *ggdescriptor.File {
 	return file
 }
 
-func getMessageType(f *descriptor.FileDescriptorProto, name string) *ggdescriptor.Message {
+func getMessageType(f *descriptor.FileDescriptorProto, name string) *Message {
 	if registry != nil {
 		msg, err := registry.LookupMsg(".", name)
 		if err != nil {
@@ -673,12 +594,21 @@ func getMessageType(f *descriptor.FileDescriptorProto, name string) *ggdescripto
 	target := splits[len(splits)-1]
 	for _, m := range f.MessageType {
 		if target == *m.Name {
-			return &ggdescriptor.Message{
+			return &Message{
 				DescriptorProto: m,
 			}
 		}
 	}
 	return nil
+}
+
+func getMessageTypeWithPackage(f *descriptor.FileDescriptorProto, name string) string {
+	message := getMessageType(f, name)
+	if message == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s.%s", f.GetPackage(), *message.Name)
 }
 
 func getEnumValue(f []*descriptor.EnumDescriptorProto, name string) []*descriptor.EnumValueDescriptorProto {
@@ -815,7 +745,7 @@ func fieldMapValueType(f *descriptor.FieldDescriptorProto, m *descriptor.Descrip
 // This method is an evolution of goTypeWithPackage. It handles message embedded.
 //
 // example:
-// ```proto
+// ```protoregistry
 // message GetArticleResponse {
 // 	Article article = 1;
 // 	message Storage {
@@ -1192,15 +1122,15 @@ func goZeroValue(f *descriptor.FieldDescriptorProto) string {
 }
 
 func jsType(f *descriptor.FieldDescriptorProto) string {
-	template := "%s"
+	tmplStr := "%s"
 	if isFieldRepeated(f) {
-		template = "Array<%s>"
+		tmplStr = "Array<%s>"
 	}
 
 	switch *f.Type {
 	case descriptor.FieldDescriptorProto_TYPE_MESSAGE,
 		descriptor.FieldDescriptorProto_TYPE_ENUM:
-		return fmt.Sprintf(template, namespacedFlowType(*f.TypeName))
+		return fmt.Sprintf(tmplStr, namespacedFlowType(*f.TypeName))
 	case descriptor.FieldDescriptorProto_TYPE_DOUBLE,
 		descriptor.FieldDescriptorProto_TYPE_FLOAT,
 		descriptor.FieldDescriptorProto_TYPE_INT64,
@@ -1213,15 +1143,15 @@ func jsType(f *descriptor.FieldDescriptorProto) string {
 		descriptor.FieldDescriptorProto_TYPE_SFIXED64,
 		descriptor.FieldDescriptorProto_TYPE_SINT32,
 		descriptor.FieldDescriptorProto_TYPE_SINT64:
-		return fmt.Sprintf(template, "number")
+		return fmt.Sprintf(tmplStr, "number")
 	case descriptor.FieldDescriptorProto_TYPE_BOOL:
-		return fmt.Sprintf(template, "boolean")
+		return fmt.Sprintf(tmplStr, "boolean")
 	case descriptor.FieldDescriptorProto_TYPE_BYTES:
-		return fmt.Sprintf(template, "Uint8Array")
+		return fmt.Sprintf(tmplStr, "Uint8Array")
 	case descriptor.FieldDescriptorProto_TYPE_STRING:
-		return fmt.Sprintf(template, "string")
+		return fmt.Sprintf(tmplStr, "string")
 	default:
-		return fmt.Sprintf(template, "any")
+		return fmt.Sprintf(tmplStr, "any")
 	}
 }
 
@@ -1256,10 +1186,14 @@ func namespacedFlowType(s string) string {
 }
 
 func httpPath(m *descriptor.MethodDescriptorProto) string {
-
-	ext, err := proto.GetExtension(m.Options, options.E_Http)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(m.Options), protoreflect.FieldNumber(options.E_Http.Field))
 	if err != nil {
 		return err.Error()
+	}
+
+	ext := proto.GetExtension(m.Options, eType)
+	if ext == nil {
+		return ""
 	}
 	opts, ok := ext.(*options.HttpRule)
 	if !ok {
@@ -1285,10 +1219,12 @@ func httpPath(m *descriptor.MethodDescriptorProto) string {
 }
 
 func httpPathsAdditionalBindings(m *descriptor.MethodDescriptorProto) []string {
-	ext, err := proto.GetExtension(m.Options, options.E_Http)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(m.Options), protoreflect.FieldNumber(options.E_Http.Field))
 	if err != nil {
 		panic(err.Error())
 	}
+
+	ext := proto.GetExtension(m.Options, eType)
 	opts, ok := ext.(*options.HttpRule)
 	if !ok {
 		panic(fmt.Sprintf("extension is %T; want an HttpRule", ext))
@@ -1319,11 +1255,11 @@ func httpPathsAdditionalBindings(m *descriptor.MethodDescriptorProto) []string {
 }
 
 func httpVerb(m *descriptor.MethodDescriptorProto) string {
-
-	ext, err := proto.GetExtension(m.Options, options.E_Http)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(m.Options), protoreflect.FieldNumber(options.E_Http.Field))
 	if err != nil {
 		return err.Error()
 	}
+	ext := proto.GetExtension(m.Options, eType)
 	opts, ok := ext.(*options.HttpRule)
 	if !ok {
 		return fmt.Sprintf("extension is %T; want an HttpRule", ext)
@@ -1348,11 +1284,11 @@ func httpVerb(m *descriptor.MethodDescriptorProto) string {
 }
 
 func httpBody(m *descriptor.MethodDescriptorProto) string {
-
-	ext, err := proto.GetExtension(m.Options, options.E_Http)
+	eType, err := protoregistry.GlobalTypes.FindExtensionByNumber(proto.MessageName(m.Options), protoreflect.FieldNumber(options.E_Http.Field))
 	if err != nil {
 		return err.Error()
 	}
+	ext := proto.GetExtension(m.Options, eType)
 	opts, ok := ext.(*options.HttpRule)
 	if !ok {
 		return fmt.Sprintf("extension is %T; want an HttpRule", ext)
@@ -1360,7 +1296,7 @@ func httpBody(m *descriptor.MethodDescriptorProto) string {
 	return opts.Body
 }
 
-func urlHasVarsFromMessage(path string, d *ggdescriptor.Message) bool {
+func urlHasVarsFromMessage(path string, d *Message) bool {
 	for _, field := range d.Field {
 		if !isFieldMessage(field) {
 			if strings.Contains(path, fmt.Sprintf("{%s}", *field.Name)) {
@@ -1416,11 +1352,11 @@ func formatID(base string, formatted string) string {
 
 func replaceDict(src string, dict map[string]interface{}) string {
 	for old, v := range dict {
-		new, ok := v.(string)
+		nval, ok := v.(string)
 		if !ok {
 			continue
 		}
-		src = strings.Replace(src, old, new, -1)
+		src = strings.Replace(src, old, nval, -1)
 	}
 	return src
 }

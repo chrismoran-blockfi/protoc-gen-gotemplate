@@ -6,10 +6,10 @@ import (
 	"log"
 	"net/http"
 
+	endpoints "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/go-kit/services/sprint/gen/endpoints"
+	pb "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/go-kit/services/sprint/gen/pb"
 	gokit_endpoint "github.com/go-kit/kit/endpoint"
 	httptransport "github.com/go-kit/kit/transport/http"
-	endpoints "moul.io/protoc-gen-gotemplate/examples/go-kit/services/sprint/gen/endpoints"
-	pb "moul.io/protoc-gen-gotemplate/examples/go-kit/services/sprint/gen/pb"
 )
 
 var _ = log.Printf

@@ -10,10 +10,10 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/golang/protobuf/protoc-gen-go/descriptor"
-	plugin_go "github.com/golang/protobuf/protoc-gen-go/plugin"
+	descriptor "google.golang.org/protobuf/types/descriptorpb"
+	plugingo "google.golang.org/protobuf/types/pluginpb"
 
-	pgghelpers "moul.io/protoc-gen-gotemplate/helpers"
+	pgghelpers "github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
 )
 
 type GenericTemplateBasedEncoder struct {
@@ -179,16 +179,16 @@ func (e *GenericTemplateBasedEncoder) buildContent(templateFilename string) (str
 	return buffer.String(), ast.Filename, nil
 }
 
-func (e *GenericTemplateBasedEncoder) Files() []*plugin_go.CodeGeneratorResponse_File {
+func (e *GenericTemplateBasedEncoder) Files() []*plugingo.CodeGeneratorResponse_File {
 	templates, err := e.templates()
 	if err != nil {
 		log.Fatalf("cannot get templates from %q: %v", e.templateDir, err)
 	}
 
 	length := len(templates)
-	files := make([]*plugin_go.CodeGeneratorResponse_File, 0, length)
+	files := make([]*plugingo.CodeGeneratorResponse_File, 0, length)
 	errChan := make(chan error, length)
-	resultChan := make(chan *plugin_go.CodeGeneratorResponse_File, length)
+	resultChan := make(chan *plugingo.CodeGeneratorResponse_File, length)
 	for _, templateFilename := range templates {
 		go func(tmpl string) {
 			var translatedFilename, content string
@@ -199,7 +199,7 @@ func (e *GenericTemplateBasedEncoder) Files() []*plugin_go.CodeGeneratorResponse
 			}
 			filename := translatedFilename[:len(translatedFilename)-len(".tmpl")]
 
-			resultChan <- &plugin_go.CodeGeneratorResponse_File{
+			resultChan <- &plugingo.CodeGeneratorResponse_File{
 				Content: &content,
 				Name:    &filename,
 			}
