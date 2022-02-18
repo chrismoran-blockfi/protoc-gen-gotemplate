@@ -1,4 +1,4 @@
-package: moul.io/protoc-gen-gotemplate/examples/go-kit
+package: github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/go-kit
 import:
 - package: github.com/go-kit/kit
   subpackages:

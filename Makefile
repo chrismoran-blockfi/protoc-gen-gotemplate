@@ -1,5 +1,5 @@
-GOPKG ?= moul.io/protoc-gen-gotemplate
-DOCKER_IMAGE ?= moul/protoc-gen-gotemplate
+GOPKG ?= github.com/blockfi/protoc-gen-gotemplate
+DOCKER_IMAGE ?= blockfi/protoc-gen-gotemplate
 GOBINS ?= . ./cmd/web-editor
 GOLIBS ?= .
 

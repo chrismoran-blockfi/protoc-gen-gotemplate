@@ -2,7 +2,7 @@
   "build-date": "2021-09-20T21:06:55.930665067Z",
   "build-hostname": "fwrz",
   "build-user": "moul",
-  "pwd": "/home/moul/go/src/moul.io/protoc-gen-gotemplate/examples/dummy",
+  "pwd": "/home/moul/go/src/github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/dummy",
   "debug": false,
   "destination-dir": "",
   "file": {

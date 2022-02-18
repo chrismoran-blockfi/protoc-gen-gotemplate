@@ -1,1 +1,3 @@
-module moul.io/protoc-gen-gotemplates/example
+module examples
+
+go 1.17

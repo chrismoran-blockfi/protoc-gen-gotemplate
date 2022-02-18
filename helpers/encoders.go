@@ -1,4 +1,4 @@
-package pgghelpers
+package main
 
 import (
 	"bytes"
@@ -10,8 +10,10 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/golang/protobuf/protoc-gen-go/descriptor"
-	plugin_go "github.com/golang/protobuf/protoc-gen-go/plugin"
+	descriptor "google.golang.org/protobuf/types/descriptorpb"
+	plugingo "google.golang.org/protobuf/types/pluginpb"
+
+	pgghelpers "github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
 )
 
 type GenericTemplateBasedEncoder struct {
@@ -51,7 +53,7 @@ func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descript
 	if debug {
 		log.Printf("new encoder: file=%q service=%q template-dir=%q", file.GetName(), service.GetName(), templateDir)
 	}
-	InitPathMap(file)
+	pgghelpers.InitPathMap(file)
 
 	return
 }
@@ -68,7 +70,7 @@ func NewGenericTemplateBasedEncoder(templateDir string, file *descriptor.FileDes
 	if debug {
 		log.Printf("new encoder: file=%q template-dir=%q", file.GetName(), templateDir)
 	}
-	InitPathMap(file)
+	pgghelpers.InitPathMap(file)
 
 	return
 }
@@ -143,7 +145,7 @@ func (e *GenericTemplateBasedEncoder) genAst(templateFilename string) (*Ast, err
 		templateFilename = unescaped
 	}
 
-	tmpl, err := template.New("").Funcs(ProtoHelpersFuncMap).Parse(templateFilename)
+	tmpl, err := template.New("").Funcs(pgghelpers.ProtoHelpersFuncMap).Parse(templateFilename)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +160,7 @@ func (e *GenericTemplateBasedEncoder) buildContent(templateFilename string) (str
 	// initialize template engine
 	fullPath := filepath.Join(e.templateDir, templateFilename)
 	templateName := filepath.Base(fullPath)
-	tmpl, err := template.New(templateName).Funcs(ProtoHelpersFuncMap).ParseFiles(fullPath)
+	tmpl, err := template.New(templateName).Funcs(pgghelpers.ProtoHelpersFuncMap).ParseFiles(fullPath)
 	if err != nil {
 		return "", "", err
 	}
@@ -177,16 +179,16 @@ func (e *GenericTemplateBasedEncoder) buildContent(templateFilename string) (str
 	return buffer.String(), ast.Filename, nil
 }
 
-func (e *GenericTemplateBasedEncoder) Files() []*plugin_go.CodeGeneratorResponse_File {
+func (e *GenericTemplateBasedEncoder) Files() []*plugingo.CodeGeneratorResponse_File {
 	templates, err := e.templates()
 	if err != nil {
 		log.Fatalf("cannot get templates from %q: %v", e.templateDir, err)
 	}
 
 	length := len(templates)
-	files := make([]*plugin_go.CodeGeneratorResponse_File, 0, length)
+	files := make([]*plugingo.CodeGeneratorResponse_File, 0, length)
 	errChan := make(chan error, length)
-	resultChan := make(chan *plugin_go.CodeGeneratorResponse_File, length)
+	resultChan := make(chan *plugingo.CodeGeneratorResponse_File, length)
 	for _, templateFilename := range templates {
 		go func(tmpl string) {
 			var translatedFilename, content string
@@ -197,7 +199,7 @@ func (e *GenericTemplateBasedEncoder) Files() []*plugin_go.CodeGeneratorResponse
 			}
 			filename := translatedFilename[:len(translatedFilename)-len(".tmpl")]
 
-			resultChan <- &plugin_go.CodeGeneratorResponse_File{
+			resultChan <- &plugingo.CodeGeneratorResponse_File{
 				Content: &content,
 				Name:    &filename,
 			}

@@ -9,8 +9,8 @@ import (
 	grpctransport "github.com/go-kit/kit/transport/grpc"
 	"google.golang.org/grpc"
 
-	endpoints "moul.io/protoc-gen-gotemplate/examples/go-kit/services/session/gen/endpoints"
-	pb "moul.io/protoc-gen-gotemplate/examples/go-kit/services/session/gen/pb"
+	endpoints "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/go-kit/services/session/gen/endpoints"
+	pb "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/go-kit/services/session/gen/pb"
 )
 
 func New(conn *grpc.ClientConn, logger log.Logger) pb.SessionServiceServer {
