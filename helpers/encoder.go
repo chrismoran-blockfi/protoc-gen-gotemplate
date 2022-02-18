@@ -1,4 +1,4 @@
-package main
+package pgghelpers
 
 import (
 	"bytes"
@@ -7,13 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
+	tmpl "text/template"
 	"time"
 
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	plugingo "google.golang.org/protobuf/types/pluginpb"
-
-	pgghelpers "github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
 )
 
 type GenericTemplateBasedEncoder struct {
@@ -53,7 +51,7 @@ func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descript
 	if debug {
 		log.Printf("new encoder: file=%q service=%q template-dir=%q", file.GetName(), service.GetName(), templateDir)
 	}
-	pgghelpers.InitPathMap(file)
+	InitPathMap(file)
 
 	return
 }
@@ -70,7 +68,7 @@ func NewGenericTemplateBasedEncoder(templateDir string, file *descriptor.FileDes
 	if debug {
 		log.Printf("new encoder: file=%q template-dir=%q", file.GetName(), templateDir)
 	}
-	pgghelpers.InitPathMap(file)
+	InitPathMap(file)
 
 	return
 }
@@ -145,11 +143,11 @@ func (e *GenericTemplateBasedEncoder) genAst(templateFilename string) (*Ast, err
 		templateFilename = unescaped
 	}
 
-	tmpl, err := template.New("").Funcs(pgghelpers.ProtoHelpersFuncMap).Parse(templateFilename)
+	templateFile, err := tmpl.New("").Funcs(ProtoHelpersFuncMap).Parse(templateFilename)
 	if err != nil {
 		return nil, err
 	}
-	if err := tmpl.Execute(buffer, ast); err != nil {
+	if err := templateFile.Execute(buffer, ast); err != nil {
 		return nil, err
 	}
 	ast.Filename = buffer.String()
@@ -160,7 +158,7 @@ func (e *GenericTemplateBasedEncoder) buildContent(templateFilename string) (str
 	// initialize template engine
 	fullPath := filepath.Join(e.templateDir, templateFilename)
 	templateName := filepath.Base(fullPath)
-	tmpl, err := template.New(templateName).Funcs(pgghelpers.ProtoHelpersFuncMap).ParseFiles(fullPath)
+	templateFile, err := tmpl.New(templateName).Funcs(ProtoHelpersFuncMap).ParseFiles(fullPath)
 	if err != nil {
 		return "", "", err
 	}
@@ -172,7 +170,7 @@ func (e *GenericTemplateBasedEncoder) buildContent(templateFilename string) (str
 
 	// generate the content
 	buffer := new(bytes.Buffer)
-	if err := tmpl.Execute(buffer, ast); err != nil {
+	if err := templateFile.Execute(buffer, ast); err != nil {
 		return "", "", err
 	}
 

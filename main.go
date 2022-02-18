@@ -1,4 +1,4 @@
-package main // import "github.com/chrismoran-blockfi/protoc-gen-gotemplate"
+package main
 
 import (
 	"io/ioutil"
@@ -125,7 +125,7 @@ func main() {
 					g.Error(err, "registry: failed to lookup file %q", file.GetName())
 				}
 			}
-			encoder := NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir)
+			encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
@@ -135,7 +135,7 @@ func main() {
 
 		if fileMode {
 			if s := file.GetService(); s != nil && len(s) > 0 {
-				encoder := NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir)
+				encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir)
 				for _, tmpl := range encoder.Files() {
 					concatOrAppend(tmpl)
 				}
@@ -145,7 +145,7 @@ func main() {
 		}
 
 		for _, service := range file.GetService() {
-			encoder := NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir)
+			encoder := pgghelpers.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}

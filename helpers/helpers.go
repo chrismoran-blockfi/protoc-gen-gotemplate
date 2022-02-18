@@ -127,6 +127,7 @@ var ProtoHelpersFuncMap = tmpl.FuncMap{
 	"snakeCase":                    xstrings.ToSnakeCase,
 	"getProtoFile":                 getProtoFile,
 	"getMessageType":               getMessageType,
+	"getMessageGoType":             getMessageGoType,
 	"getMessageTypeWithPackage":    getMessageTypeWithPackage,
 	"getEnumValue":                 getEnumValue,
 	"isFieldMessage":               isFieldMessage,
@@ -580,6 +581,29 @@ func getProtoFile(name string) *File {
 }
 
 func getMessageType(f *descriptor.FileDescriptorProto, name string) *Message {
+	if registry != nil {
+		msg, err := registry.LookupMsg(".", name)
+		if err != nil {
+			panic(err)
+		}
+		return msg
+	}
+
+	// name is in the form .packageName.MessageTypeName.InnerMessageTypeName...
+	// e.g. .article.ProductTag
+	splits := strings.Split(name, ".")
+	target := splits[len(splits)-1]
+	for _, m := range f.MessageType {
+		if target == *m.Name {
+			return &Message{
+				DescriptorProto: m,
+			}
+		}
+	}
+	return nil
+}
+
+func getMessageGoType(f *descriptor.FileDescriptorProto, name string) *Message {
 	if registry != nil {
 		msg, err := registry.LookupMsg(".", name)
 		if err != nil {
