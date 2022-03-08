@@ -21,6 +21,7 @@ type GenericTemplateBasedEncoder struct {
 	enum           []*descriptor.EnumDescriptorProto
 	debug          bool
 	destinationDir string
+	index          int
 }
 
 type Ast struct {
@@ -37,9 +38,10 @@ type Ast struct {
 	TemplateDir    string                             `json:"template-dir"`
 	Service        *descriptor.ServiceDescriptorProto `json:"service"`
 	Enum           []*descriptor.EnumDescriptorProto  `json:"enum"`
+	Index          int
 }
 
-func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descriptor.ServiceDescriptorProto, file *descriptor.FileDescriptorProto, debug bool, destinationDir string) (e *GenericTemplateBasedEncoder) {
+func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descriptor.ServiceDescriptorProto, file *descriptor.FileDescriptorProto, debug bool, destinationDir string, index int) (e *GenericTemplateBasedEncoder) {
 	e = &GenericTemplateBasedEncoder{
 		service:        service,
 		file:           file,
@@ -47,6 +49,7 @@ func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descript
 		debug:          debug,
 		destinationDir: destinationDir,
 		enum:           file.GetEnumType(),
+		index:          index,
 	}
 	if debug {
 		log.Printf("new encoder: file=%q service=%q template-dir=%q", file.GetName(), service.GetName(), templateDir)
@@ -56,7 +59,7 @@ func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descript
 	return
 }
 
-func NewGenericTemplateBasedEncoder(templateDir string, file *descriptor.FileDescriptorProto, debug bool, destinationDir string) (e *GenericTemplateBasedEncoder) {
+func NewGenericTemplateBasedEncoder(templateDir string, file *descriptor.FileDescriptorProto, debug bool, destinationDir string, index int) (e *GenericTemplateBasedEncoder) {
 	e = &GenericTemplateBasedEncoder{
 		service:        nil,
 		file:           file,
@@ -64,6 +67,7 @@ func NewGenericTemplateBasedEncoder(templateDir string, file *descriptor.FileDes
 		enum:           file.GetEnumType(),
 		debug:          debug,
 		destinationDir: destinationDir,
+		index:          index,
 	}
 	if debug {
 		log.Printf("new encoder: file=%q template-dir=%q", file.GetName(), templateDir)
@@ -133,6 +137,7 @@ func (e *GenericTemplateBasedEncoder) genAst(templateFilename string) (*Ast, err
 		Filename:       "",
 		Service:        e.service,
 		Enum:           e.enum,
+		Index:          e.index,
 	}
 	buffer := new(bytes.Buffer)
 

@@ -1,5 +1,7 @@
 # Common variables
 {{- $file := .File}}
+{{`{{.Index}}`}}:                                                                               {{.Index}}
+{{`{{.Index | add 40000}}`}}:                                                                   {{.Index | add 40000}}
 {{`{{.File.Name}}`}}:                                                                           {{.File.Name}}
 {{`{{.File.Name | upper}}`}}:                                                                   {{.File.Name | upper}}
 {{`{{.File.Package | base | replace "." "-"}}`}}                                                {{.File.Package | base | replace "." "-"}}
@@ -56,7 +58,9 @@
 {{`{{2 | plural "one anchovy" "many anchovies"}}`}}:       {{2 | plural "one anchovy" "many anchovies"}}
 {{`{{3 | plural "one anchovy" "many anchovies"}}`}}:       {{3 | plural "one anchovy" "many anchovies"}}
 
-
+{{.File.Name | upper}}
+{{.File | goPkgLastElement}}
+{{.File.Package}}
 {{range .Service.Method}}{{$in := .InputType | getMessageTypeWithPackage $file}}{{$out := .OutputType | getMessageType $file}}
     {{$in}}
 {{end}}

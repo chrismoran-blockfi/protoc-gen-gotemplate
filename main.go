@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"go-micro.dev/v4/cmd/protoc-gen-micro/generator"
@@ -44,6 +45,7 @@ func main() {
 	var (
 		templateDir       = "./templates"
 		destinationDir    = "."
+		index             = -1
 		debug             = false
 		all               = false
 		singlePackageMode = false
@@ -57,6 +59,11 @@ func main() {
 				continue
 			}
 			switch parts[0] {
+			case "index":
+				index, err = strconv.Atoi(parts[1])
+				if err != nil {
+					log.Printf("Could not convert %s to an integer", parts[1])
+				}
 			case "template_dir":
 				templateDir = parts[1]
 			case "destination_dir":
@@ -118,14 +125,18 @@ func main() {
 	}
 
 	// Generate the encoders
-	for _, file := range g.Request.GetProtoFile() {
+	for fileIndex, file := range g.Request.GetProtoFile() {
+		templateIndex := index
+		if index == -1 {
+			templateIndex = fileIndex
+		}
 		if all {
 			if singlePackageMode {
 				if _, err = registry.LookupFile(file.GetName()); err != nil {
 					g.Error(err, "registry: failed to lookup file %q", file.GetName())
 				}
 			}
-			encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir)
+			encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
@@ -135,7 +146,7 @@ func main() {
 
 		if fileMode {
 			if s := file.GetService(); s != nil && len(s) > 0 {
-				encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir)
+				encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
 				for _, tmpl := range encoder.Files() {
 					concatOrAppend(tmpl)
 				}
@@ -145,7 +156,7 @@ func main() {
 		}
 
 		for _, service := range file.GetService() {
-			encoder := pgghelpers.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir)
+			encoder := pgghelpers.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir, templateIndex)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
