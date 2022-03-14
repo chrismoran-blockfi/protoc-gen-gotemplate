@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go-micro.dev/v4/cmd/protoc-gen-micro/generator"
 	"google.golang.org/protobuf/proto"
 	plugingo "google.golang.org/protobuf/types/pluginpb"
 
@@ -24,7 +23,7 @@ const (
 )
 
 func main() {
-	g := generator.New()
+	g := pgghelpers.NewGenerator()
 
 	data, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
