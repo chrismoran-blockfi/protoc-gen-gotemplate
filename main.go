@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -89,7 +90,7 @@ func main() {
 					all = true
 				case boolFalse, "f":
 				default:
-					log.Printf("Err: invalid value for debug: %q", parts[1])
+					log.Printf("Err: invalid value for all: %q", parts[1])
 				}
 			case "file-mode":
 				switch strings.ToLower(parts[1]) {
@@ -106,11 +107,19 @@ func main() {
 	}
 
 	tmplMap := make(map[string]*plugingo.CodeGeneratorResponse_File)
+	ipMap := make(map[string]bool)
 	concatOrAppend := func(file *plugingo.CodeGeneratorResponse_File) {
-		if val, ok := tmplMap[file.GetName()]; ok {
-			*val.Content += file.GetContent()
+		key := fmt.Sprintf("%s:%s", file.GetName(), file.GetInsertionPoint())
+		if len(file.GetInsertionPoint()) > 0 {
+			ipMap[fmt.Sprintf("%s:%d", file.GetName(), 0)] = false
+		}
+
+		if val, ok := tmplMap[key]; ok {
+			if _, isOk := ipMap[key]; !isOk {
+				*val.Content += file.GetContent()
+			}
 		} else {
-			tmplMap[file.GetName()] = file
+			tmplMap[key] = file
 			g.Response.File = append(g.Response.File, file)
 		}
 	}
@@ -123,12 +132,14 @@ func main() {
 		}
 	}
 
+	baseIndex := 0
 	// Generate the encoders
-	for fileIndex, file := range g.Request.GetProtoFile() {
+	for _, file := range g.Request.GetProtoFile() {
 		templateIndex := index
 		if index == -1 {
-			templateIndex = fileIndex
+			templateIndex = baseIndex
 		}
+		baseIndex = baseIndex + 1
 		if all {
 			if singlePackageMode {
 				if _, err = registry.LookupFile(file.GetName()); err != nil {
@@ -161,7 +172,6 @@ func main() {
 			}
 		}
 	}
-
 	// Generate the protobufs
 	g.GenerateAllFiles()
 

@@ -1,0 +1,4 @@
+# Below is the insertion_point
+I've been injected at a very precise location
+// @@protoc_insertion_point(here)
+# Above is the insertion_point

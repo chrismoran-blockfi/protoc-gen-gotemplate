@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package dummy;
+
+option go_package = "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/insertion";
+
+message DummyMessage {
+}
+
+service DummyService {
+  rpc DummyRpc(DummyMessage) returns (DummyMessage) {}
+}

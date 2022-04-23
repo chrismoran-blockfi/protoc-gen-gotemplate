@@ -1196,6 +1196,7 @@ func (g *Generator) GenerateAllFiles() {
 		})
 	}
 	g.Response.SupportedFeatures = proto.Uint64(SupportedFeatures)
+	sort.Sort(ResponseSorter(g.Response.File))
 }
 
 // Run all the plugins associated with the file.

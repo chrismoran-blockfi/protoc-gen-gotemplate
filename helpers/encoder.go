@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	tmpl "text/template"
 	"time"
@@ -13,6 +14,12 @@ import (
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	plugingo "google.golang.org/protobuf/types/pluginpb"
 )
+
+type ResponseSorter []*plugingo.CodeGeneratorResponse_File
+
+func (a ResponseSorter) Len() int           { return len(a) }
+func (a ResponseSorter) Less(i, _ int) bool { return len(a[i].GetInsertionPoint()) == 0 }
+func (a ResponseSorter) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 type GenericTemplateBasedEncoder struct {
 	templateDir    string
@@ -194,17 +201,33 @@ func (e *GenericTemplateBasedEncoder) Files() []*plugingo.CodeGeneratorResponse_
 	resultChan := make(chan *plugingo.CodeGeneratorResponse_File, length)
 	for _, templateFilename := range templates {
 		go func(tmpl string) {
-			var translatedFilename, content string
+			var translatedFilename, content, insertionPoint, filename string
+			if strings.Contains(tmpl, "@") {
+				insertionPoint = tmpl[strings.Index(tmpl, "@")+1 : strings.Index(tmpl, ".tmpl")]
+				//tmpl = tmpl[:strings.Index(tmpl, "@")] + ".tmpl"
+			}
 			content, translatedFilename, err = e.buildContent(tmpl)
 			if err != nil {
 				errChan <- err
 				return
 			}
-			filename := translatedFilename[:len(translatedFilename)-len(".tmpl")]
+			if len(insertionPoint) > 0 {
+				filename = tmpl[:strings.Index(tmpl, "@")]
+			} else {
+				filename = translatedFilename[:len(translatedFilename)-len(".tmpl")]
+			}
 
-			resultChan <- &plugingo.CodeGeneratorResponse_File{
-				Content: &content,
-				Name:    &filename,
+			if len(insertionPoint) > 0 {
+				resultChan <- &plugingo.CodeGeneratorResponse_File{
+					Content:        &content,
+					Name:           &filename,
+					InsertionPoint: &insertionPoint,
+				}
+			} else {
+				resultChan <- &plugingo.CodeGeneratorResponse_File{
+					Content: &content,
+					Name:    &filename,
+				}
 			}
 		}(templateFilename)
 	}
@@ -216,5 +239,6 @@ func (e *GenericTemplateBasedEncoder) Files() []*plugingo.CodeGeneratorResponse_
 			panic(err)
 		}
 	}
+	sort.Sort(ResponseSorter(files))
 	return files
 }
