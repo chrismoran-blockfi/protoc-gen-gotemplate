@@ -417,6 +417,22 @@ type Object interface {
 	File() *FileDescriptor
 }
 
+type RequestFileSorter struct {
+	Request *plugin.CodeGeneratorRequest
+}
+
+func (r RequestFileSorter) Len() int {
+	return len(r.Request.ProtoFile)
+}
+
+func (r RequestFileSorter) Less(i, j int) bool {
+	return strings.Compare(r.Request.ProtoFile[i].GetName(), r.Request.ProtoFile[j].GetName()) == -1
+}
+
+func (r RequestFileSorter) Swap(i, j int) {
+	r.Request.ProtoFile[i], r.Request.ProtoFile[j] = r.Request.ProtoFile[j], r.Request.ProtoFile[i]
+}
+
 // Generator is the type whose methods generate the output, stored in the associated response structure.
 type Generator struct {
 	*bytes.Buffer

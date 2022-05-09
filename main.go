@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -134,7 +135,11 @@ func main() {
 
 	baseIndex := 0
 	// Generate the encoders
-	for _, file := range g.Request.GetProtoFile() {
+	rfs := pgghelpers.RequestFileSorter{
+		Request: g.Request,
+	}
+	sort.Sort(rfs)
+	for _, file := range rfs.Request.GetProtoFile() {
 		templateIndex := index
 		if index == -1 {
 			templateIndex = baseIndex
