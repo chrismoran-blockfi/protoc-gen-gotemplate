@@ -7,6 +7,7 @@ import (
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	tmpl "text/template"
@@ -44,6 +45,69 @@ var ProtoHelpersFuncMap = tmpl.FuncMap{
 		}
 		return string(a)
 	},
+	"makeimport": func(imp ...string) string {
+		prefix := ""
+		i := ""
+		if len(imp) > 0 {
+			i = imp[0]
+		}
+		if len(imp) > 1 {
+			prefix = imp[1]
+		}
+		if len(prefix) == 0 {
+			return fmt.Sprintf("\"%s\"", i)
+		}
+		return fmt.Sprintf("%s \"%s\"", prefix, i)
+	},
+	"makeimports": func(dependencies []string, imps []interface{}) string {
+		impmap := make(map[string]string, len(imps)*2)
+		for _, dep := range dependencies {
+			gopkg := getProtoFile(dep).GoPkg
+			key := gopkg.Path
+			val := gopkg.Alias
+			wrap := ""
+			if !strings.Contains(key, "\"") {
+				wrap = "\""
+			}
+			key = fmt.Sprintf("%s%s%s", wrap, key, wrap)
+			impmap[key] = val
+		}
+		for _, itimp := range imps {
+			timp := fmt.Sprintf("%s", itimp)
+			imp := []string{"", timp}
+			if strings.Contains(timp, " ") {
+				imp = strings.Split(timp, " ")
+			}
+			wrap := ""
+			if !strings.Contains(imp[1], "\"") {
+				wrap = "\""
+			}
+			imp[1] = fmt.Sprintf("%s%s%s", wrap, imp[1], wrap)
+			impmap[imp[1]] = imp[0]
+		}
+
+		r := make([]string, 0, len(impmap))
+		for k := range impmap {
+			r = append(r, k)
+		}
+		sort.Strings(r)
+		var i string
+		for _, ir := range r {
+			prefix := impmap[ir]
+			line := fmt.Sprintf("%s %s", prefix, ir)
+			if len(prefix) == 0 {
+				line = fmt.Sprintf("%s", ir)
+			}
+			if len(i) == 0 {
+				i = fmt.Sprintf("%s", line)
+			} else {
+				i = fmt.Sprintf("%s%s%s", i, "\n\t", line)
+			}
+
+		}
+
+		return i
+	},
 	"splitArray": func(sep string, s string) []interface{} {
 		var r []interface{}
 		t := strings.Split(s, sep)
@@ -53,6 +117,19 @@ var ProtoHelpersFuncMap = tmpl.FuncMap{
 			}
 		}
 		return r
+	},
+	"joinSort": func(sep string, s ...string) string {
+		res := ""
+
+		sort.Strings(s)
+		for _, str := range s {
+			if len(res) == 0 {
+				res = fmt.Sprintf("%s", str)
+			} else {
+				res = fmt.Sprintf("%s%s%s", res, sep, str)
+			}
+		}
+		return res
 	},
 	"first": func(a []string) string {
 		return a[0]
