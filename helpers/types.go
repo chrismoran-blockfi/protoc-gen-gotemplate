@@ -1,18 +1,21 @@
-package pgghelpers
+package helpers
 
 import (
 	"fmt"
 	"github.com/huandu/xstrings"
+	"strconv"
 	"strings"
 
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 )
 
-// IsWellKnownType returns true if the provided fully qualified type name is considered 'well-known'.
-func IsWellKnownType(typeName string) bool {
-	_, ok := wellKnownTypeConv[typeName]
-	return ok
-}
+// A GoImportPath is the import path of a Go package. e.g., "google.golang.org/genproto/protobuf".
+type GoImportPath string
+
+func (p GoImportPath) String() string { return strconv.Quote(string(p)) }
+
+// A GoPackageName is the name of a Go package. e.g., "protobuf".
+type GoPackageName string
 
 // GoPackage represents a golang package
 type GoPackage struct {
@@ -48,6 +51,15 @@ type File struct {
 	Enums []*Enum
 	// Services is the list of services defined in this file.
 	Services []*Service
+	// Directives is the mappings of elements to comment-directives in this file
+	Directives map[interface{}][]CommentDirective
+}
+
+type CommentDirective struct {
+	Directive string
+	Params    string
+	Value     string
+	Type      string
 }
 
 // proto2 determines if the syntax of the file is proto2.
@@ -168,46 +180,14 @@ type Method struct {
 	RequestType *Message
 	// ResponseType is the message type of responses from this method.
 	ResponseType *Message
-	Bindings     []*Binding
 }
 
 // FQMN returns a fully qualified rpc method name of this method.
 func (m *Method) FQMN() string {
-	components := []string{}
+	components := make([]string, 2)
 	components = append(components, m.Service.FQSN())
 	components = append(components, m.GetName())
 	return strings.Join(components, ".")
-}
-
-// Binding describes how an HTTP endpoint is bound to a gRPC method.
-type Binding struct {
-	// Method is the method which the endpoint is bound to.
-	Method *Method
-	// Index is a zero-origin index of the binding in the target method
-	Index int
-	// PathTmpl is path template where this method is mapped to.
-	PathTmpl Template
-	// HTTPMethod is the HTTP method which this method is mapped to.
-	HTTPMethod string
-	// PathParams is the list of parameters provided in HTTP request paths.
-	PathParams []Parameter
-	// Body describes parameters provided in HTTP request body.
-	Body *Body
-	// ResponseBody describes field in response struct to marshal in HTTP response body.
-	ResponseBody *Body
-}
-
-// ExplicitParams returns a list of explicitly bound parameters of "b",
-// i.e. a union of field path for body and field paths for path parameters.
-func (b *Binding) ExplicitParams() []string {
-	var result []string
-	if b.Body != nil {
-		result = append(result, b.Body.FieldPath.String())
-	}
-	for _, p := range b.PathParams {
-		result = append(result, p.FieldPath.String())
-	}
-	return result
 }
 
 // Field wraps descriptor.FieldDescriptorProto for richer features.
@@ -217,67 +197,6 @@ type Field struct {
 	// FieldMessage is the message type of the field.
 	FieldMessage *Message
 	*descriptor.FieldDescriptorProto
-}
-
-// Parameter is a parameter provided in http requests
-type Parameter struct {
-	// FieldPath is a path to a proto field which this parameter is mapped to.
-	FieldPath
-	// Target is the proto field which this parameter is mapped to.
-	Target *Field
-	// Method is the method which this parameter is used for.
-	Method *Method
-}
-
-// ConvertFuncExpr returns a go expression of a converter function.
-// The converter function converts a string into a value for the parameter.
-func (p Parameter) ConvertFuncExpr() (string, error) {
-	tbl := proto3ConvertFuncs
-	if !p.IsProto2() && p.IsRepeated() {
-		tbl = proto3RepeatedConvertFuncs
-	} else if p.IsProto2() && !p.IsRepeated() {
-		tbl = proto2ConvertFuncs
-	} else if p.IsProto2() && p.IsRepeated() {
-		tbl = proto2RepeatedConvertFuncs
-	}
-	typ := p.Target.GetType()
-	conv, ok := tbl[typ]
-	if !ok {
-		conv, ok = wellKnownTypeConv[p.Target.GetTypeName()]
-	}
-	if !ok {
-		return "", fmt.Errorf("unsupported field type %s of parameter %s in %s.%s", typ, p.FieldPath, p.Method.Service.GetName(), p.Method.GetName())
-	}
-	return conv, nil
-}
-
-// IsEnum returns true if the field is an enum type, otherwise false is returned.
-func (p Parameter) IsEnum() bool {
-	return p.Target.GetType() == descriptor.FieldDescriptorProto_TYPE_ENUM
-}
-
-// IsRepeated returns true if the field is repeated, otherwise false is returned.
-func (p Parameter) IsRepeated() bool {
-	return p.Target.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REPEATED
-}
-
-// IsProto2 returns true if the field is proto2, otherwise false is returned.
-func (p Parameter) IsProto2() bool {
-	return p.Target.Message.File.proto2()
-}
-
-// Body describes a http (request|response) body to be sent to the (method|client).
-// This is used in body and response_body options in google.api.HttpRule
-type Body struct {
-	// FieldPath is a path to a proto field which the (request|response) body is mapped to.
-	// The (request|response) body is mapped to the (request|response) type itself if FieldPath is empty.
-	FieldPath FieldPath
-}
-
-// AssignableExpr returns an assignable expression in Go to be used to initialize method request object.
-// It starts with "msgExpr", which is the go expression of the method request object.
-func (b Body) AssignableExpr(msgExpr string) string {
-	return b.FieldPath.AssignableExpr(msgExpr)
 }
 
 // FieldPath is a path to a field from a request message.
@@ -363,6 +282,7 @@ func (c FieldPathComponent) ValueExpr() string {
 }
 
 var (
+/*
 	proto3ConvertFuncs = map[descriptor.FieldDescriptorProto_Type]string{
 		descriptor.FieldDescriptorProto_TYPE_DOUBLE:  "runtime.Float64",
 		descriptor.FieldDescriptorProto_TYPE_FLOAT:   "runtime.Float32",
@@ -448,7 +368,6 @@ var (
 		descriptor.FieldDescriptorProto_TYPE_SINT32:   "runtime.Int32Slice",
 		descriptor.FieldDescriptorProto_TYPE_SINT64:   "runtime.Int64Slice",
 	}
-
 	wellKnownTypeConv = map[string]string{
 		".google.protobuf.Timestamp":   "runtime.Timestamp",
 		".google.protobuf.Duration":    "runtime.Duration",
@@ -462,58 +381,5 @@ var (
 		".google.protobuf.Int64Value":  "runtime.Int64Value",
 		".google.protobuf.UInt64Value": "runtime.UInt64Value",
 	}
+*/
 )
-
-type template struct {
-	segments []segment
-	verb     string
-	template string
-}
-
-type segment interface {
-	fmt.Stringer
-	compile() (ops []op)
-}
-
-type wildcard struct{}
-
-type deepWildcard struct{}
-
-type literal string
-
-type variable struct {
-	path     string
-	segments []segment
-}
-
-func (wildcard) String() string {
-	return "*"
-}
-
-func (deepWildcard) String() string {
-	return "**"
-}
-
-func (l literal) String() string {
-	return string(l)
-}
-
-func (v variable) String() string {
-	var segs []string
-	for _, s := range v.segments {
-		segs = append(segs, s.String())
-	}
-	return fmt.Sprintf("{%s=%s}", v.path, strings.Join(segs, "/"))
-}
-
-func (t template) String() string {
-	var segs []string
-	for _, s := range t.segments {
-		segs = append(segs, s.String())
-	}
-	str := strings.Join(segs, "/")
-	if t.verb != "" {
-		str = fmt.Sprintf("%s:%s", str, t.verb)
-	}
-	return "/" + str
-}
