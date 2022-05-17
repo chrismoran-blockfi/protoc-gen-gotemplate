@@ -387,7 +387,7 @@ func parseExpression(re *regexp.Regexp, str string) []map[string]string {
 	return paramsMap
 }
 
-var directiveRe = regexp.MustCompile("(?ms)@@(?P<directive>[^(]*)(?:\\((?P<params>[^)]+(?:,\\s)?)\\)\\s*`{0,3}(?P<value>[^`]*)?`{0,3})?")
+var directiveRe = regexp.MustCompile(`(?s)@@(?P<directive>[^(]*)(?:\((?P<params>[^)]+(?:,\s)?)\)\s*\x60{0,3}\s*(?P<value>[^\x60@]*)?\s*\x60{0,3})?`)
 
 func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 	directivesMap := *dMap
@@ -395,31 +395,31 @@ func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 		leading := strings.Trim(loc.GetLeadingComments(), " \t\r")
 		if strings.HasPrefix(leading, "@@") {
 			if directivesMap[i] == nil {
-				mapping := parseExpression(directiveRe, leading)
 				directivesMap[i] = make([]CommentDirective, 0)
-				for j := range mapping {
-					directivesMap[i] = append(directivesMap[i], CommentDirective{
-						Directive: mapping[j]["directive"],
-						Params:    mapping[j]["params"],
-						Value:     mapping[j]["value"],
-						Type:      "leading",
-					})
-				}
+			}
+			mapping := parseExpression(directiveRe, leading)
+			for j := range mapping {
+				directivesMap[i] = append(directivesMap[i], CommentDirective{
+					Directive: mapping[j]["directive"],
+					Params:    mapping[j]["params"],
+					Value:     mapping[j]["value"],
+					Type:      "leading",
+				})
 			}
 		}
 		trailing := strings.Trim(loc.GetTrailingComments(), " \t\r")
 		if strings.HasPrefix(trailing, "@@") {
 			if directivesMap[i] == nil {
-				mapping := parseExpression(directiveRe, trailing)
 				directivesMap[i] = make([]CommentDirective, 0)
-				for j := range mapping {
-					directivesMap[i] = append(directivesMap[i], CommentDirective{
-						Directive: mapping[j]["directive"],
-						Params:    mapping[j]["params"],
-						Value:     mapping[j]["value"],
-						Type:      "trailing",
-					})
-				}
+			}
+			mapping := parseExpression(directiveRe, trailing)
+			for j := range mapping {
+				directivesMap[i] = append(directivesMap[i], CommentDirective{
+					Directive: mapping[j]["directive"],
+					Params:    mapping[j]["params"],
+					Value:     mapping[j]["value"],
+					Type:      "trailing",
+				})
 			}
 		}
 		detached := loc.GetLeadingDetachedComments()
