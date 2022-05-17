@@ -2,21 +2,19 @@ package main
 
 import (
 	"fmt"
+	"github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
+	"google.golang.org/protobuf/proto"
+	plugingo "google.golang.org/protobuf/types/pluginpb"
 	"io/ioutil"
 	"log"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-
-	"google.golang.org/protobuf/proto"
-	plugingo "google.golang.org/protobuf/types/pluginpb"
-
-	pgghelpers "github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
 )
 
 var (
-	registry *pgghelpers.Registry
+	registry *helpers.Registry
 )
 
 const (
@@ -24,23 +22,47 @@ const (
 	boolFalse = "false"
 )
 
+type Generator struct {
+	Request  *plugingo.CodeGeneratorRequest  // The input.
+	Response *plugingo.CodeGeneratorResponse // The output.
+}
+
+func NewGenerator() *Generator {
+	g := new(Generator)
+	g.Request = new(plugingo.CodeGeneratorRequest)
+	g.Response = new(plugingo.CodeGeneratorResponse)
+	return g
+}
+
+// Error reports a problem, including an error, and exits the program.
+func Error(err error, msgs ...string) {
+	s := strings.Join(msgs, " ") + ":" + err.Error()
+	log.Print("protoc-gen-gotemplate: error:", s)
+	os.Exit(1)
+}
+
+// Fail reports a problem and exits the program.
+func Fail(msgs ...string) {
+	s := strings.Join(msgs, " ")
+	log.Print("protoc-gen-gotemplate: error:", s)
+	os.Exit(1)
+}
+
 func main() {
-	g := pgghelpers.NewGenerator()
+	g := NewGenerator()
 
 	data, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
-		g.Error(err, "reading input")
+		Error(err, "reading input")
 	}
 
 	if err = proto.Unmarshal(data, g.Request); err != nil {
-		g.Error(err, "parsing input proto")
+		Error(err, "parsing input proto")
 	}
 
 	if len(g.Request.FileToGenerate) == 0 {
-		g.Fail("no files to generate")
+		Fail("no files to generate")
 	}
-
-	g.CommandLineParameters(g.Request.GetParameter())
 
 	// Parse parameters
 	var (
@@ -111,31 +133,38 @@ func main() {
 	ipMap := make(map[string]bool)
 	concatOrAppend := func(file *plugingo.CodeGeneratorResponse_File) {
 		key := fmt.Sprintf("%s:%s", file.GetName(), file.GetInsertionPoint())
-		if len(file.GetInsertionPoint()) > 0 {
-			ipMap[fmt.Sprintf("%s:%d", file.GetName(), 0)] = false
-		}
+		baseFile := fmt.Sprintf("%s:", file.GetName())
 
 		if val, ok := tmplMap[key]; ok {
-			if _, isOk := ipMap[key]; !isOk {
-				*val.Content += file.GetContent()
-			}
+			*val.Content += file.GetContent()
 		} else {
-			tmplMap[key] = file
-			g.Response.File = append(g.Response.File, file)
+			if key == baseFile {
+				tmplMap[key] = file
+				ipMap[key] = true
+			}
+			if exists, isOk := ipMap[baseFile]; !isOk || !exists {
+				if debug {
+					_, _ = fmt.Fprintf(os.Stderr, "%s does not exist, skipping %s\n", baseFile, key)
+				}
+			} else {
+				tmplMap[key] = file
+				ipMap[baseFile] = true
+				g.Response.File = append(g.Response.File, file)
+			}
 		}
 	}
 
 	if singlePackageMode {
-		registry = pgghelpers.NewRegistry()
-		pgghelpers.SetRegistry(registry)
+		registry = helpers.NewRegistry()
+		helpers.SetRegistry(registry)
 		if err = registry.Load(g.Request); err != nil {
-			g.Error(err, "registry: failed to load the request")
+			Error(err, "registry: failed to load the request")
 		}
 	}
 
 	baseIndex := 0
 	// Generate the encoders
-	rfs := pgghelpers.RequestFileSorter{
+	rfs := helpers.RequestFileSorter{
 		Request: g.Request,
 	}
 	sort.Sort(rfs)
@@ -148,10 +177,10 @@ func main() {
 		if all {
 			if singlePackageMode {
 				if _, err = registry.LookupFile(file.GetName()); err != nil {
-					g.Error(err, "registry: failed to lookup file %q", file.GetName())
+					Error(err, "registry: failed to lookup file %q", file.GetName())
 				}
 			}
-			encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
+			encoder := helpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
@@ -161,7 +190,7 @@ func main() {
 
 		if fileMode {
 			if s := file.GetService(); s != nil && len(s) > 0 {
-				encoder := pgghelpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
+				encoder := helpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
 				for _, tmpl := range encoder.Files() {
 					concatOrAppend(tmpl)
 				}
@@ -171,22 +200,22 @@ func main() {
 		}
 
 		for _, service := range file.GetService() {
-			encoder := pgghelpers.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir, templateIndex)
+			encoder := helpers.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir, templateIndex)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
 		}
 	}
 	// Generate the protobufs
-	g.GenerateAllFiles()
+	g.Response.SupportedFeatures = proto.Uint64(uint64(plugingo.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL))
 
 	data, err = proto.Marshal(g.Response)
 	if err != nil {
-		g.Error(err, "failed to marshal output proto")
+		Error(err, "failed to marshal output proto")
 	}
 
 	_, err = os.Stdout.Write(data)
 	if err != nil {
-		g.Error(err, "failed to write output proto")
+		Error(err, "failed to write output proto")
 	}
 }

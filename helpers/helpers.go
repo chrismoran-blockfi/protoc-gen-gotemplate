@@ -1,4 +1,4 @@
-package pgghelpers
+package helpers
 
 import (
 	"encoding/json"
@@ -296,17 +296,9 @@ func getStore(key string) interface{} {
 func SetRegistry(reg *Registry) {
 	registry = reg
 }
-
-func InitPathMap(file *descriptor.FileDescriptorProto) {
+func LoadComments(file *descriptor.FileDescriptorProto) {
 	pathMap = make(map[interface{}]*descriptor.SourceCodeInfo_Location)
 	addToPathMap(file.GetSourceCodeInfo(), file, []int32{})
-}
-
-func InitPathMaps(files []*descriptor.FileDescriptorProto) {
-	pathMap = make(map[interface{}]*descriptor.SourceCodeInfo_Location)
-	for _, file := range files {
-		addToPathMap(file.GetSourceCodeInfo(), file, []int32{})
-	}
 }
 
 // addToPathMap traverses through the AST adding SourceCodeInfo_Location entries to the pathMap.
@@ -375,12 +367,81 @@ func samePath(a, b []int32) bool {
 	return true
 }
 
-/*func findSourceInfoLocation(i interface{}) *descriptor.SourceCodeInfo_Location {
-	if pathMap == nil {
-		return nil
+func parseExpression(re *regexp.Regexp, str string) []map[string]string {
+	match := re.FindAllStringSubmatch(str, -1)
+
+	paramsMap := make([]map[string]string, len(match))
+	for i := range paramsMap {
+		paramsMap[i] = make(map[string]string)
 	}
-	return pathMap[i]
-}*/
+	for j := range match {
+		for i, name := range re.SubexpNames() {
+			if i == 0 {
+				continue
+			}
+			if i > 0 && i <= len(match[j]) {
+				paramsMap[j][name] = match[j][i]
+			}
+		}
+	}
+	return paramsMap
+}
+
+var directiveRe = regexp.MustCompile(`(?s)@@(?P<directive>[^(]*)(?:\((?P<params>[^)]+(?:,\s)?)\)\s*\x60{0,3}\s*(?P<value>[^\x60@]*)?\s*\x60{0,3})?`)
+
+func parseDirectives(dMap *map[interface{}][]CommentDirective) {
+	directivesMap := *dMap
+	for i, loc := range pathMap {
+		leading := strings.Trim(loc.GetLeadingComments(), " \t\r")
+		if strings.HasPrefix(leading, "@@") {
+			if directivesMap[i] == nil {
+				directivesMap[i] = make([]CommentDirective, 0)
+			}
+			mapping := parseExpression(directiveRe, leading)
+			for j := range mapping {
+				directivesMap[i] = append(directivesMap[i], CommentDirective{
+					Directive: mapping[j]["directive"],
+					Params:    mapping[j]["params"],
+					Value:     mapping[j]["value"],
+					Type:      "leading",
+				})
+			}
+		}
+		trailing := strings.Trim(loc.GetTrailingComments(), " \t\r")
+		if strings.HasPrefix(trailing, "@@") {
+			if directivesMap[i] == nil {
+				directivesMap[i] = make([]CommentDirective, 0)
+			}
+			mapping := parseExpression(directiveRe, trailing)
+			for j := range mapping {
+				directivesMap[i] = append(directivesMap[i], CommentDirective{
+					Directive: mapping[j]["directive"],
+					Params:    mapping[j]["params"],
+					Value:     mapping[j]["value"],
+					Type:      "trailing",
+				})
+			}
+		}
+		detached := loc.GetLeadingDetachedComments()
+		for _, ldc := range detached {
+			dc := strings.Trim(ldc, " \t\r")
+			if strings.HasPrefix(dc, "@@") {
+				if directivesMap[i] == nil {
+					directivesMap[i] = make([]CommentDirective, 0)
+				}
+				mapping := parseExpression(directiveRe, dc)
+				for k := range mapping {
+					directivesMap[i] = append(directivesMap[i], CommentDirective{
+						Directive: mapping[k]["directive"],
+						Params:    mapping[k]["params"],
+						Value:     mapping[k]["value"],
+						Type:      "detached",
+					})
+				}
+			}
+		}
+	}
+}
 
 func leadingComment(i interface{}) string {
 	loc := pathMap[i]

@@ -1,4 +1,4 @@
-package pgghelpers
+package helpers
 
 import (
 	"bytes"
@@ -17,9 +17,34 @@ import (
 
 type ResponseSorter []*plugingo.CodeGeneratorResponse_File
 
-func (a ResponseSorter) Len() int           { return len(a) }
-func (a ResponseSorter) Less(i, _ int) bool { return len(a[i].GetInsertionPoint()) == 0 }
-func (a ResponseSorter) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ResponseSorter) Len() int {
+	return len(a)
+}
+
+func (a ResponseSorter) Less(i, j int) bool {
+	nameCmp := strings.Compare(a[i].GetName(), a[j].GetName())
+	return nameCmp < 0 || nameCmp == 0 && len(a[i].GetInsertionPoint()) == 0
+}
+
+func (a ResponseSorter) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
+type RequestFileSorter struct {
+	Request *plugingo.CodeGeneratorRequest
+}
+
+func (r RequestFileSorter) Len() int {
+	return len(r.Request.ProtoFile)
+}
+
+func (r RequestFileSorter) Less(i, j int) bool {
+	return strings.Compare(r.Request.ProtoFile[i].GetName(), r.Request.ProtoFile[j].GetName()) == -1
+}
+
+func (r RequestFileSorter) Swap(i, j int) {
+	r.Request.ProtoFile[i], r.Request.ProtoFile[j] = r.Request.ProtoFile[j], r.Request.ProtoFile[i]
+}
 
 type GenericTemplateBasedEncoder struct {
 	templateDir    string
@@ -29,6 +54,8 @@ type GenericTemplateBasedEncoder struct {
 	debug          bool
 	destinationDir string
 	index          int
+	pathMap        map[interface{}]*descriptor.SourceCodeInfo_Location
+	directivesMap  map[interface{}][]CommentDirective
 }
 
 type Ast struct {
@@ -45,7 +72,7 @@ type Ast struct {
 	TemplateDir    string                             `json:"template-dir"`
 	Service        *descriptor.ServiceDescriptorProto `json:"service"`
 	Enum           []*descriptor.EnumDescriptorProto  `json:"enum"`
-	Index          int
+	Index          int                                `json:"index"`
 }
 
 func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descriptor.ServiceDescriptorProto, file *descriptor.FileDescriptorProto, debug bool, destinationDir string, index int) (e *GenericTemplateBasedEncoder) {
@@ -57,12 +84,13 @@ func NewGenericServiceTemplateBasedEncoder(templateDir string, service *descript
 		destinationDir: destinationDir,
 		enum:           file.GetEnumType(),
 		index:          index,
+		directivesMap:  make(map[interface{}][]CommentDirective),
 	}
 	if debug {
 		log.Printf("new encoder: file=%q service=%q template-dir=%q", file.GetName(), service.GetName(), templateDir)
 	}
-	InitPathMap(file)
-
+	LoadComments(file)
+	parseDirectives(&e.directivesMap)
 	return
 }
 
@@ -75,17 +103,25 @@ func NewGenericTemplateBasedEncoder(templateDir string, file *descriptor.FileDes
 		debug:          debug,
 		destinationDir: destinationDir,
 		index:          index,
+		directivesMap:  make(map[interface{}][]CommentDirective),
 	}
 	if debug {
 		log.Printf("new encoder: file=%q template-dir=%q", file.GetName(), templateDir)
 	}
-	InitPathMap(file)
+	LoadComments(file)
+	parseDirectives(&e.directivesMap)
 
 	return
 }
 
-func (e *GenericTemplateBasedEncoder) templates() ([]string, error) {
-	filenames := []string{}
+type template struct {
+	fileName       string
+	content        string
+	insertionPoint string
+}
+
+func (e *GenericTemplateBasedEncoder) templates() ([]template, error) {
+	templates := make([]template, 0)
 
 	err := filepath.Walk(e.templateDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -105,10 +141,27 @@ func (e *GenericTemplateBasedEncoder) templates() ([]string, error) {
 			log.Printf("new template: %q", rel)
 		}
 
-		filenames = append(filenames, rel)
+		templates = append(templates, template{
+			fileName: rel,
+		})
 		return nil
 	})
-	return filenames, err
+	for _, dirs := range e.directivesMap {
+		for _, dir := range dirs {
+			if dir.Directive == "protoc_insert" {
+				params := strings.Split(dir.Params, ", ")
+				name := params[0]
+				insert := params[1]
+				content := dir.Value
+				templates = append(templates, template{
+					fileName:       name,
+					content:        content,
+					insertionPoint: insert,
+				})
+			}
+		}
+	}
+	return templates, err
 }
 
 func (e *GenericTemplateBasedEncoder) genAst(templateFilename string) (*Ast, error) {
@@ -166,13 +219,23 @@ func (e *GenericTemplateBasedEncoder) genAst(templateFilename string) (*Ast, err
 	return &ast, nil
 }
 
-func (e *GenericTemplateBasedEncoder) buildContent(templateFilename string) (string, string, error) {
+func (e *GenericTemplateBasedEncoder) buildContent(tmplt template) (string, string, error) {
 	// initialize template engine
+	if tmplt.content == "" {
+	}
+	templateFilename := tmplt.fileName
 	fullPath := filepath.Join(e.templateDir, templateFilename)
 	templateName := filepath.Base(fullPath)
-	templateFile, err := tmpl.New(templateName).Funcs(ProtoHelpersFuncMap).ParseFiles(fullPath)
-	if err != nil {
-		return "", "", err
+
+	templateFile := tmpl.New(templateName).Funcs(ProtoHelpersFuncMap)
+	var terr error
+	if tmplt.content == "" {
+		templateFile, terr = templateFile.ParseFiles(fullPath)
+	} else {
+		templateFile, terr = templateFile.Parse(tmplt.content)
+	}
+	if terr != nil {
+		return "", "", terr
 	}
 
 	ast, err := e.genAst(templateFilename)
@@ -199,20 +262,25 @@ func (e *GenericTemplateBasedEncoder) Files() []*plugingo.CodeGeneratorResponse_
 	files := make([]*plugingo.CodeGeneratorResponse_File, 0, length)
 	errChan := make(chan error, length)
 	resultChan := make(chan *plugingo.CodeGeneratorResponse_File, length)
-	for _, templateFilename := range templates {
-		go func(tmpl string) {
+
+	for _, templ := range templates {
+		go func(tmpl template) {
 			var translatedFilename, content, insertionPoint, filename string
-			if strings.Contains(tmpl, "@") {
-				insertionPoint = tmpl[strings.Index(tmpl, "@")+1 : strings.Index(tmpl, ".tmpl")]
-				//tmpl = tmpl[:strings.Index(tmpl, "@")] + ".tmpl"
+
+			if strings.Contains(tmpl.fileName, "@") {
+				insertionPoint = tmpl.fileName[strings.Index(tmpl.fileName, "@")+1 : strings.Index(tmpl.fileName, ".tmpl")]
 			}
+			if tmpl.insertionPoint != "" {
+				insertionPoint = tmpl.insertionPoint
+			}
+
 			content, translatedFilename, err = e.buildContent(tmpl)
 			if err != nil {
 				errChan <- err
 				return
 			}
-			if len(insertionPoint) > 0 {
-				filename = tmpl[:strings.Index(tmpl, "@")]
+			if len(insertionPoint) > 0 && strings.Contains(tmpl.fileName, "@") {
+				filename = tmpl.fileName[:strings.Index(tmpl.fileName, "@")]
 			} else {
 				filename = translatedFilename[:len(translatedFilename)-len(".tmpl")]
 			}
@@ -229,7 +297,7 @@ func (e *GenericTemplateBasedEncoder) Files() []*plugingo.CodeGeneratorResponse_
 					Name:    &filename,
 				}
 			}
-		}(templateFilename)
+		}(templ)
 	}
 	for i := 0; i < length; i++ {
 		select {

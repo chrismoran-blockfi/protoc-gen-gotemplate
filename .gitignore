@@ -1,25 +1,40 @@
-# Temporary files
-*~
-*#
-.#*
-coverage.txt
+# Ignore everything (better safe...)
+*
+# Whitelist directories (important!)
+!*/
+# Whitelist parent folders recursively so we can whitelist files later (important!)
+!/**/
+# Whitelist anything with an extension (important!)
+!*.*
 
-# Vendors
-package-lock.json
-node_modules/
-vendor/
+# Specific rules may now follow...
 
 # Binaries for programs and plugins
-dist/
-gin-bin
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, build with `go test -c`
+# Test binary, built with `go test -c`
 *.test
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+# Dependency directories
+vendor/
+
+# Target directories (build targets produce files here)
+build/
+
+.idea
+*.generated.go
+.envrc.custom
+.DS_Store
+
+!Dockerfile-debug
+!.githooks/
+!.githooks/*
+!.githooks/**
+.vscode/**
