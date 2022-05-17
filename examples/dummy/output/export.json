@@ -750,5 +750,6 @@
       }
     ]
   },
-  "enum": null
+  "enum": null,
+  "index": 0
 }
