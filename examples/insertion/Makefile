@@ -1,12 +1,7 @@
 .PHONY: build
 build:
-	protoc -I. --gotemplate_out=template_dir=.,debug=true:. *.proto
+	protoc --gotemplate_out=template_dir=.:. *.proto
 
 
 .PHONY: re
-re: clean build
-
-
-.PHONY: clean
-clean:
-	rm -rf output
+re: build
