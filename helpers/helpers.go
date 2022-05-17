@@ -379,7 +379,7 @@ func parseExpression(re *regexp.Regexp, str string) []map[string]string {
 			if i == 0 {
 				continue
 			}
-			if i > 0 && i <= len(match) {
+			if i > 0 && i <= len(match[j]) {
 				paramsMap[j][name] = match[j][i]
 			}
 		}
@@ -387,7 +387,7 @@ func parseExpression(re *regexp.Regexp, str string) []map[string]string {
 	return paramsMap
 }
 
-var directiveRe = regexp.MustCompile(`@@(?P<directive>[^(]*)(?:\((?P<params>[^)]+(?:,\s)?)\)\s?(?P<value>.*)?)?\n`)
+var directiveRe = regexp.MustCompile("(?ms)@@(?P<directive>[^(]*)(?:\\((?P<params>[^)]+(?:,\\s)?)\\)\\s*`{0,3}(?P<value>[^`]*)?`{0,3})?")
 
 func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 	directivesMap := *dMap
@@ -423,23 +423,21 @@ func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 			}
 		}
 		detached := loc.GetLeadingDetachedComments()
-		for j, ldc := range detached {
+		for _, ldc := range detached {
 			dc := strings.Trim(ldc, " \t\r")
 			if strings.HasPrefix(dc, "@@") {
-				dc = strings.TrimPrefix(strings.Join(detached[j:], "\n"), " \t\r")
 				if directivesMap[i] == nil {
-					mapping := parseExpression(directiveRe, dc)
 					directivesMap[i] = make([]CommentDirective, 0)
-					for k := range mapping {
-						directivesMap[i] = append(directivesMap[i], CommentDirective{
-							Directive: mapping[k]["directive"],
-							Params:    mapping[k]["params"],
-							Value:     mapping[k]["value"],
-							Type:      "detached",
-						})
-					}
 				}
-				break
+				mapping := parseExpression(directiveRe, dc)
+				for k := range mapping {
+					directivesMap[i] = append(directivesMap[i], CommentDirective{
+						Directive: mapping[k]["directive"],
+						Params:    mapping[k]["params"],
+						Value:     mapping[k]["value"],
+						Type:      "detached",
+					})
+				}
 			}
 		}
 	}
