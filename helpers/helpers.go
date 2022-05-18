@@ -392,7 +392,7 @@ var directiveRe = regexp.MustCompile(`(?s)@@(?P<directive>[^(]*)(?:\((?P<params>
 func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 	directivesMap := *dMap
 	for i, loc := range pathMap {
-		leading := strings.Trim(loc.GetLeadingComments(), " \t\r")
+		leading := strings.Trim(loc.GetLeadingComments(), " \t\r\n")
 		if strings.HasPrefix(leading, "@@") {
 			if directivesMap[i] == nil {
 				directivesMap[i] = make([]CommentDirective, 0)
@@ -407,7 +407,7 @@ func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 				})
 			}
 		}
-		trailing := strings.Trim(loc.GetTrailingComments(), " \t\r")
+		trailing := strings.Trim(loc.GetTrailingComments(), " \t\r\n")
 		if strings.HasPrefix(trailing, "@@") {
 			if directivesMap[i] == nil {
 				directivesMap[i] = make([]CommentDirective, 0)
@@ -424,7 +424,7 @@ func parseDirectives(dMap *map[interface{}][]CommentDirective) {
 		}
 		detached := loc.GetLeadingDetachedComments()
 		for _, ldc := range detached {
-			dc := strings.Trim(ldc, " \t\r")
+			dc := strings.Trim(ldc, " \t\r\n")
 			if strings.HasPrefix(dc, "@@") {
 				if directivesMap[i] == nil {
 					directivesMap[i] = make([]CommentDirective, 0)
