@@ -4,12 +4,12 @@ package dummy;
 
 option go_package = "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/insertion";
 
-//@@protoc_insert(example.txt.tmpl, example_insert2) I am from an annotation above "DummyMessage"
+//@@protoc_insert(example.txt.tmpl, insert0) I am from an annotation above "DummyMessage"
 message DummyMessage {
 }
 
-//@@protoc_insert(example.txt.tmpl, example_insert) i was inserted via proto-file directive for the DummyService!
-//@@protoc_insert(example.txt.tmpl, example_multi_insert) ```Multiple lines can also be inserted
+//@@protoc_insert(example.txt.tmpl, insert1) i was inserted via proto-file directive for the {{.Name}}!
+//@@protoc_insert(example.txt.tmpl, insert_multi) ```Multiple lines can also be inserted
 //for more complicated scenarios```
 service DummyService {
   rpc DummyRpc(DummyMessage) returns (DummyMessage) {}

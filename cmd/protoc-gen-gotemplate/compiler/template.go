@@ -711,6 +711,22 @@ func (gen *Plugin) Response() *pluginpb.CodeGeneratorResponse {
 		resp.Error = proto.String(gen.err.Error())
 		return resp
 	}
+
+	for _, i := range gen.genFiles {
+		if !i.skip {
+			continue
+		}
+		for _, g := range gen.genFiles {
+			if g.skip {
+				continue
+			}
+			if i.filename == g.filename && len(g.insertionPoint) > 0 && i.insertionPoint == g.insertionPoint {
+				g.buf.Write(i.buf.Bytes())
+				i.Skip()
+			}
+		}
+	}
+
 	for _, g := range gen.genFiles {
 		if g.skip {
 			continue
@@ -1338,7 +1354,6 @@ func (gen *Plugin) NewGeneratedFile(filename string, insertionPoint string, goIm
 
 	for _, i := range gen.genFiles {
 		if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
-			i.buf.Write(g.buf.Bytes())
 			g.Skip()
 		}
 	}
