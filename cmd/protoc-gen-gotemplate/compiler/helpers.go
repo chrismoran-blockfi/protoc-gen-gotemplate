@@ -586,16 +586,8 @@ func renderMethodWithArgs(m *Method, p ...string) string {
 	tc := getContext()
 	inPkg := string(tc.file.GoPackageName)
 	outPkg := string(tc.file.GoPackageName)
-	if tc.file.GoImportPath == m.Input.GoIdent.GoImportPath {
-		inPkg = ""
-	} else {
-		inPkg = fmt.Sprintf("%s.", tc.AddImport(string(m.Input.GoIdent.GoImportPath)))
-	}
-	if tc.file.GoImportPath == m.Output.GoIdent.GoImportPath {
-		outPkg = ""
-	} else {
-		outPkg = fmt.Sprintf("%s.", tc.AddImport(string(m.Output.GoIdent.GoImportPath)))
-	}
+	inPkg = fmt.Sprintf("%s.", tc.AddImport(string(m.Input.GoIdent.GoImportPath)))
+	outPkg = fmt.Sprintf("%s.", tc.AddImport(string(m.Output.GoIdent.GoImportPath)))
 	ctx := fmt.Sprintf("%s%s%s.%s", p[0], sep, tc.goPackageName("context"), "Context")
 	inType := fmt.Sprintf("%s%s*%s%s", p[1], sep, inPkg, m.Input.GoIdent.GoName)
 	outType := fmt.Sprintf("%s%s*%s%s", p[2], sep, outPkg, m.Output.GoIdent.GoName)
