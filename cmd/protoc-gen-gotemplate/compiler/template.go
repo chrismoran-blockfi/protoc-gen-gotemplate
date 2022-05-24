@@ -144,6 +144,7 @@ type Plugin struct {
 	mode           Mode
 	index          int
 	debug          bool
+	genMu          sync.Mutex
 	genFiles       []*GeneratedFile
 	opts           Options
 	err            error
@@ -711,6 +712,9 @@ func (gen *Plugin) Response() *pluginpb.CodeGeneratorResponse {
 		resp.Error = proto.String(gen.err.Error())
 		return resp
 	}
+
+	gen.genMu.Lock()
+	defer gen.genMu.Unlock()
 
 	for _, i := range gen.genFiles {
 		if !i.skip {
@@ -1352,8 +1356,11 @@ func (gen *Plugin) NewGeneratedFile(filename string, insertionPoint string, goIm
 		g.usedPackageNames[GoPackageName(s)] = true
 	}
 
+	gen.genMu.Lock()
+	defer gen.genMu.Unlock()
+
 	for _, i := range gen.genFiles {
-		if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
+		if i.filename == g.filename && len(i.insertionPoint) > 0 && len(g.insertionPoint) > 0 && i.insertionPoint == g.insertionPoint {
 			g.Skip()
 		}
 	}
