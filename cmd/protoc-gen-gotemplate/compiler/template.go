@@ -225,6 +225,9 @@ func (tc *TemplateContext) RenderImports() string {
 			continue
 		}
 		packageName := tc.goPackageName(importPath)
+		if _, ok := tc.usedPackages[importPath]; !ok {
+			packageName = "."
+		}
 		imports[importPath] = packageName
 	}
 	for importPath := range tc.addedImports {
