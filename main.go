@@ -1,18 +1,9 @@
 package main
 
-import (
-	"fmt"
-	"github.com/chrismoran-blockfi/protoc-gen-gotemplate/helpers"
-	"google.golang.org/protobuf/proto"
-	plugingo "google.golang.org/protobuf/types/pluginpb"
-	"io/ioutil"
-	"log"
-	"os"
-	"sort"
-	"strconv"
-	"strings"
-)
+func main() {
+}
 
+/*
 var (
 	registry *helpers.Registry
 )
@@ -155,8 +146,8 @@ func main() {
 	}
 
 	if singlePackageMode {
-		registry = helpers.NewRegistry()
-		helpers.SetRegistry(registry)
+		registry = gengotemplate.NewRegistry()
+		gengotemplate.SetRegistry(registry)
 		if err = registry.Load(g.Request); err != nil {
 			Error(err, "registry: failed to load the request")
 		}
@@ -164,7 +155,7 @@ func main() {
 
 	baseIndex := 0
 	// Generate the encoders
-	rfs := helpers.RequestFileSorter{
+	rfs := gengotemplate.RequestFileSorter{
 		Request: g.Request,
 	}
 	sort.Sort(rfs)
@@ -180,7 +171,7 @@ func main() {
 					Error(err, "registry: failed to lookup file %q", file.GetName())
 				}
 			}
-			encoder := helpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
+			encoder := gengotemplate.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
@@ -190,7 +181,7 @@ func main() {
 
 		if fileMode {
 			if s := file.GetService(); s != nil && len(s) > 0 {
-				encoder := helpers.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
+				encoder := gengotemplate.NewGenericTemplateBasedEncoder(templateDir, file, debug, destinationDir, templateIndex)
 				for _, tmpl := range encoder.Files() {
 					concatOrAppend(tmpl)
 				}
@@ -200,7 +191,7 @@ func main() {
 		}
 
 		for _, service := range file.GetService() {
-			encoder := helpers.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir, templateIndex)
+			encoder := gengotemplate.NewGenericServiceTemplateBasedEncoder(templateDir, service, file, debug, destinationDir, templateIndex)
 			for _, tmpl := range encoder.Files() {
 				concatOrAppend(tmpl)
 			}
@@ -219,3 +210,4 @@ func main() {
 		Error(err, "failed to write output proto")
 	}
 }
+*/

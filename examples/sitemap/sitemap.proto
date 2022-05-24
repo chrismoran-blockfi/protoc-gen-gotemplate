@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sitemap;
+option go_package = "./sitemap";
 
 service DummyService {
   rpc Posts(Request) returns (Response) {}
