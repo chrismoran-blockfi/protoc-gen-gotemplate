@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	gotemplate "text/template"
 
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -171,6 +172,7 @@ type TemplateContext struct {
 	file             *File
 	service          *Service
 	plugin           *Plugin
+	impMu            sync.Mutex
 	packageNames     map[GoImportPath]GoPackageName
 	usedPackages     map[GoImportPath]bool  // Packages used in current file.
 	usedPackageNames map[GoPackageName]bool // Package names used in the current file.
@@ -191,6 +193,9 @@ func baseName(name string) string {
 }
 
 func (tc *TemplateContext) RenderImports() string {
+	tc.impMu.Lock()
+	defer tc.impMu.Unlock()
+
 	imports := make(map[GoImportPath]GoPackageName)
 	sorted := make([]string, 0)
 	protoimports := tc.file.Desc.Imports()
@@ -252,13 +257,12 @@ func (tc *TemplateContext) goPackageName(importPath GoImportPath) GoPackageName 
 }
 
 func (tc *TemplateContext) AddImport(i string) GoPackageName {
+	tc.impMu.Lock()
+	defer tc.impMu.Unlock()
+
 	importPath := GoImportPath(i)
 	tc.addedImports[importPath] = true
 	return tc.goPackageName(importPath)
-}
-
-func (tc *TemplateContext) FindProtoFile(name string) *File {
-	return tc.plugin.FilesByPath[name]
 }
 
 func (tc *TemplateContext) Context() interface{} {
