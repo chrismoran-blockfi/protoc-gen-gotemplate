@@ -185,6 +185,11 @@ func baseName(name string) string {
 	saveName := name
 	currentName := name
 	found := true
+	// Find the last element
+	// if the last element is a version path find the previous element
+	// if the last element has a - (hyphen) take the last element of the hyphenated token
+	//  ex: repo.com/mine/go-good ==> good
+	//  ex: another.org/yours/do-no-harm/v3 ==> harm
 	for i := strings.LastIndex(name, "/"); found && i >= 0; i = strings.LastIndex(currentName, "/") {
 		saveName = currentName[i+1:]
 		currentName = currentName[:i]
@@ -267,12 +272,34 @@ func (tc *TemplateContext) goPackageName(importPath GoImportPath) GoPackageName 
 	return name
 }
 
+func (tc *TemplateContext) FindImport(impr string) GoPackageName {
+	tc.impMu.Lock()
+	defer tc.impMu.Unlock()
+
+	searchPath := GoImportPath(impr)
+	protoimports := tc.file.Desc.Imports()
+	for i := 0; i < protoimports.Len(); i = i + 1 {
+		imp := protoimports.Get(i)
+		s := imp.Path()
+		fd := tc.plugin.FilesByPath[s]
+		importPath := fd.GoImportPath
+		if importPath == searchPath {
+			packageName := tc.goPackageName(importPath)
+			tc.usedPackages[importPath] = true
+			return packageName
+		}
+	}
+
+	return ""
+}
+
 func (tc *TemplateContext) AddImport(i string) GoPackageName {
 	tc.impMu.Lock()
 	defer tc.impMu.Unlock()
 
 	importPath := GoImportPath(i)
 	tc.addedImports[importPath] = true
+	tc.usedPackages[importPath] = true
 	return tc.goPackageName(importPath)
 }
 
@@ -1309,6 +1336,15 @@ func (gen *Plugin) NewGeneratedFile(filename string, insertionPoint string, goIm
 		g.usedPackageNames[GoPackageName(s)] = true
 	}
 
+	for _, i := range gen.genFiles {
+		if len(i.insertionPoint) > 0 {
+			continue
+		}
+		if i.filename == g.filename {
+			i.buf.Write(g.buf.Bytes())
+			g.Skip()
+		}
+	}
 	gen.genFiles = append(gen.genFiles, g)
 	return g
 }
