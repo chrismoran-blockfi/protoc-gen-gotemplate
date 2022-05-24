@@ -1337,10 +1337,7 @@ func (gen *Plugin) NewGeneratedFile(filename string, insertionPoint string, goIm
 	}
 
 	for _, i := range gen.genFiles {
-		if len(i.insertionPoint) > 0 {
-			continue
-		}
-		if i.filename == g.filename {
+		if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
 			i.buf.Write(g.buf.Bytes())
 			g.Skip()
 		}
