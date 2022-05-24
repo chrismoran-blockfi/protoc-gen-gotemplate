@@ -181,15 +181,26 @@ type TemplateContext struct {
 
 // baseName returns the last path element of the name, with the last dotted suffix removed.
 func baseName(name string) string {
-	// First, find the last element
-	if i := strings.LastIndex(name, "/"); i >= 0 {
-		name = name[i+1:]
+	// Save our place
+	saveName := name
+	currentName := name
+	found := true
+	for i := strings.LastIndex(name, "/"); found && i >= 0; i = strings.LastIndex(currentName, "/") {
+		saveName = currentName[i+1:]
+		currentName = currentName[:i]
+		found, _ = regexp.MatchString("v[1-9]\\d*", saveName)
+		if !found {
+			if i = strings.LastIndex(saveName, "-"); i >= 0 {
+				saveName = saveName[i+1:]
+			}
+		}
 	}
+
 	// Now drop the suffix
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[0:i]
+	if i := strings.LastIndex(saveName, "."); i >= 0 {
+		saveName = saveName[0:i]
 	}
-	return name
+	return saveName
 }
 
 func (tc *TemplateContext) RenderImports() string {
