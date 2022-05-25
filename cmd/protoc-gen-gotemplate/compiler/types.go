@@ -176,7 +176,7 @@ func newTemplate(opts ...templateOption) *template {
 	}
 	if len(t.rawFileName) > 0 && strings.Contains(t.rawFileName, "@") && strings.HasSuffix(t.rawFileName, ".tmpl") {
 		t.insertionPoint = t.rawFileName[strings.Index(t.rawFileName, "@")+1 : strings.Index(t.rawFileName, ".tmpl")]
-		t.fileName = t.outputFileName()
+		t.fileName = t.outputFileName(t.rawFileName)
 	}
 	if len(t.fileName) == 0 {
 		t.fileName = t.rawFileName
@@ -185,8 +185,7 @@ func newTemplate(opts ...templateOption) *template {
 	return t
 }
 
-func (t *template) outputFileName() string {
-	fileName := t.rawFileName
+func (t *template) outputFileName(fileName string) string {
 	if len(t.insertionPoint) > 0 && strings.Contains(fileName, "@") {
 		fileName = fileName[:strings.Index(fileName, "@")] + ".tmpl"
 	}
@@ -258,7 +257,7 @@ func (t *template) createContext(mode Mode, index int, directable Directable) (*
 	}
 	nopt.Filename = buffer.String()
 	t.fileName = nopt.Filename
-	t.fileName = t.outputFileName()
+	t.fileName = t.outputFileName(t.fileName)
 	return nopt, nil
 }
 
