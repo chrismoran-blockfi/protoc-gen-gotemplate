@@ -333,6 +333,10 @@ func (tc *TemplateContext) Service() *Service {
 	return nil
 }
 
+func (tc *TemplateContext) TemplateContext() *TemplateContext {
+	return getContext(tc.File().Proto.GetName())
+}
+
 type Directable interface {
 	Directives() []CommentDirective
 }
@@ -401,6 +405,7 @@ func (gen *Plugin) createContext(templateFilename string, index int, directable 
 		nopt.file = directable.(*File)
 		nopt.service = nil
 	}
+	setContext(nopt)
 
 	buffer := new(bytes.Buffer)
 
