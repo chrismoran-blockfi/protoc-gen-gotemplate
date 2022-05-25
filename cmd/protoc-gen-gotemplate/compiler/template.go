@@ -729,8 +729,10 @@ func (gen *Plugin) Response() *pluginpb.CodeGeneratorResponse {
 			if g.skip {
 				continue
 			}
-			if i.filename == g.filename && len(g.insertionPoint) > 0 && i.insertionPoint == g.insertionPoint {
-				g.buf.Write(i.buf.Bytes())
+			if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
+				if len(g.insertionPoint) > 0 {
+					g.buf.Write(i.buf.Bytes())
+				}
 				i.Skip()
 			}
 		}
@@ -1365,7 +1367,7 @@ func (gen *Plugin) NewGeneratedFile(filename string, insertionPoint string, goIm
 	defer gen.genMu.Unlock()
 
 	for _, i := range gen.genFiles {
-		if i.filename == g.filename && len(i.insertionPoint) > 0 && len(g.insertionPoint) > 0 && i.insertionPoint == g.insertionPoint {
+		if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
 			g.Skip()
 		}
 	}
