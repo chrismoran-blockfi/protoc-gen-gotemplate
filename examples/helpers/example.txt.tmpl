@@ -6,7 +6,6 @@
 {{.RenderImports}}
 
 {{- $file := .File}}
-{{$nfile := .FindProtoFile "helpers.proto"}}PROTO LOOKUP: {{$nfile.Desc}}
 {{`{{.Index}}`}}:                                                                               {{.Index}}
 {{`{{.Index | add 40000}}`}}:                                                                   {{.Index | add 40000}}
 {{`{{.Name}}`}}:                                                                                {{.Name}}

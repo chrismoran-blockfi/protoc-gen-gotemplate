@@ -207,12 +207,14 @@ func (s *globalStore) setData(key string, o interface{}) interface{} {
 }
 
 func setContext(o *TemplateContext) *TemplateContext {
-	store.setData("$this", o)
+	key := fmt.Sprintf("%s_%s", "$this", o.File().Proto.GetName())
+	store.setData(key, o)
 	return o
 }
 
-func getContext() *TemplateContext {
-	return store.getData("$this").(*TemplateContext)
+func getContext(s string) *TemplateContext {
+	key := fmt.Sprintf("%s_%s", "$this", s)
+	return store.getData(key).(*TemplateContext)
 }
 
 func setStore(key string, o interface{}) string {
@@ -583,7 +585,7 @@ func renderMethodWithArgs(m *Method, p ...string) string {
 	} else {
 		sep = " "
 	}
-	tc := getContext()
+	tc := getContext(m.Parent.File.Proto.GetName())
 	inPkg := string(tc.file.GoPackageName)
 	outPkg := string(tc.file.GoPackageName)
 	inPkg = fmt.Sprintf("%s.", tc.AddImport(string(m.Input.GoIdent.GoImportPath)))
