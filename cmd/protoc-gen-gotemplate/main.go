@@ -28,6 +28,7 @@ func main() {
 		if err := intio.ReplaceStdin(data); err != nil {
 			panic(err)
 		}
+		_ = os.Setenv("PROTOC_GEN_GOTEMPLATE_DEBUG", "true")
 		os.Args = []string{os.Args[0]}
 	} else if doDebug, ok := os.LookupEnv("PROTOC_GEN_GOTEMPLATE_DEBUGFILE"); ok && len(doDebug) > 0 {
 		data, err := intio.PeekStdin()

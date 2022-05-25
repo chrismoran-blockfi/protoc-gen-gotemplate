@@ -4,29 +4,29 @@ package dummy;
 
 option go_package = "github.com/chrismoran-blockfi/protoc-gen-gotemplate/examples/insertion";
 
-message DummyMessage {
+message DummyMessageThing {
 }
 
 /* @@protoc_insert(example.go.tmpl, imports) ```
 import (
-"bytes"
+"errors"
 )
 
 ```
 */
 /* @@protoc_insert(example.go.tmpl, functions) ```
-func doBytesThing() {
-_ = bytes.Buffer{}
-fmt.Println("Did bytes.Buffer")
+func doErrorsThing() {
+_ = errors.New("")
+fmt.Println("Did errors.New")
 }
 
 ```
 */
 /* @@protoc_insert(example.go.tmpl, main_body) ```
-	doBytesThing()
+	doErrorsThing()
 ```
 */
 
-service DummyService {
-	rpc DummyRpc(DummyMessage) returns (DummyMessage) {}
+service DummyThing {
+	rpc DummyRpc(DummyMessageThing) returns (DummyMessageThing) {}
 }

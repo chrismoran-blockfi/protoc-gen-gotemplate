@@ -1,0 +1,8 @@
+{{- /*gotype: github.com/chrismoran-blockfi/protoc-gen-gotemplate/cmd/protoc-gen-gotemplate/compiler.TemplateContext*/ -}}
+{{- if .PragmaOnce -}}
+// doContextThing from file
+func doContextThing() {
+	_ = context.TODO()
+	fmt.Println("Just used 'context.TODO()'")
+}
+{{end -}}

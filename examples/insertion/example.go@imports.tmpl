@@ -1,0 +1,6 @@
+{{- /*gotype: github.com/chrismoran-blockfi/protoc-gen-gotemplate/cmd/protoc-gen-gotemplate/compiler.TemplateContext*/ -}}
+{{- if .PragmaOnce -}}
+{{- $fmt := .AddImport "fmt" -}}
+{{- $ctx := .AddImport "context" -}}
+{{.RenderImports}}
+{{end -}}

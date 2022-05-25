@@ -7,10 +7,12 @@ package compiler
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/chrismoran-blockfi/protoc-gen-gotemplate/internal/genid"
 	"github.com/chrismoran-blockfi/protoc-gen-gotemplate/internal/strs"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -19,9 +21,10 @@ import (
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/pluginpb"
 	"io/ioutil"
 	"log"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -30,94 +33,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	gotemplate "text/template"
-
-	"google.golang.org/protobuf/types/descriptorpb"
-	"google.golang.org/protobuf/types/pluginpb"
-)
-
-const goPackageDocURL = "https://developers.google.com/protocol-buffers/docs/reference/go-generated#package"
-
-var SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
-
-const (
-	boolTrue  = "true"
-	boolFalse = "false"
-)
-
-type ResponseSorter []*pluginpb.CodeGeneratorResponse_File
-
-func (a ResponseSorter) Len() int {
-	return len(a)
-}
-
-func (a ResponseSorter) Less(i, j int) bool {
-	nameCmp := strings.Compare(a[i].GetName(), a[j].GetName())
-	return nameCmp < 0 || nameCmp == 0 && len(a[i].GetInsertionPoint()) == 0
-}
-
-func (a ResponseSorter) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
-}
-
-// Run executes a function as a protoc plugin.
-//
-// It reads a CodeGeneratorRequest message from os.Stdin, invokes the plugin
-// function, and writes a CodeGeneratorResponse message to os.Stdout.
-//
-// If a failure occurs while reading or writing, Run prints an error to
-// os.Stderr and calls os.Exit(1).
-func (opts Options) Run(f func(*Plugin) error) {
-	if err := run(opts, f); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "%s: %v\n", filepath.Base(os.Args[0]), err)
-		os.Exit(1)
-	}
-}
-
-func run(opts Options, f func(*Plugin) error) error {
-	if len(os.Args) > 1 {
-		return fmt.Errorf("unknown argument %q (this program should be run by protoc, not directly)", os.Args[1])
-	}
-	in, err := ioutil.ReadAll(os.Stdin)
-	if err != nil {
-		return err
-	}
-	req := &pluginpb.CodeGeneratorRequest{}
-	if err := proto.Unmarshal(in, req); err != nil {
-		return err
-	}
-	gen, err := opts.New(req)
-	if err != nil {
-		return err
-	}
-	if err = f(gen); err != nil {
-		// Errors from the plugin function are reported by setting the
-		// error field in the CodeGeneratorResponse.
-		//
-		// In contrast, errors that indicate a problem in protoc
-		// itself (unparsable input, I/O errors, etc.) are reported
-		// to stderr.
-		gen.Error(err)
-	}
-	resp := gen.Response()
-	out, err := proto.Marshal(resp)
-	//jsonOut, _ := json.MarshalIndent(resp, "", "  ")
-	//_, _ = fmt.Fprintf(os.Stderr, "%s\n", jsonOut)
-	if err != nil {
-		return err
-	}
-	if _, err = os.Stdout.Write(out); err != nil {
-		return err
-	}
-	return nil
-}
-
-type Mode int
-
-const (
-	ServiceMode Mode = iota
-	FileMode
-	AllMode
 )
 
 // A Plugin is a protoc plugin invocation.
@@ -159,190 +74,63 @@ type Options struct {
 	ImportRewriteFunc func(GoImportPath) GoImportPath
 }
 
-type template struct {
-	fileName       string
-	content        string
-	insertionPoint string
+// Run executes a function as a protoc plugin.
+//
+// It reads a CodeGeneratorRequest message from os.Stdin, invokes the plugin
+// function, and writes a CodeGeneratorResponse message to os.Stdout.
+//
+// If a failure occurs while reading or writing, Run prints an error to
+// os.Stderr and calls os.Exit(1).
+func (opts Options) Run(f func(*Plugin) error) {
+	if err := run(opts, f); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "%s: %v\n", filepath.Base(os.Args[0]), err)
+		os.Exit(1)
+	}
 }
 
-type TemplateContext struct {
-	Mode             Mode   `json:"mode"`
-	Index            int    `json:"index"`
-	RawFilename      string `json:"raw-filename"`
-	Filename         string `json:"filename"`
-	file             *File
-	service          *Service
-	plugin           *Plugin
-	impMu            sync.Mutex
-	packageNames     map[GoImportPath]GoPackageName
-	usedPackages     map[GoImportPath]bool  // Packages used in current file.
-	usedPackageNames map[GoPackageName]bool // Package names used in the current file.
-	addedImports     map[GoImportPath]bool  // Additional imports to emit.
-}
-
-// baseName returns the last path element of the name, with the last dotted suffix removed.
-func baseName(name string) string {
-	// Save our place
-	saveName := name
-	currentName := name
-	found := true
-	// Find the last element
-	// if the last element is a version path find the previous element
-	// if the last element has a - (hyphen) take the last element of the hyphenated token
-	//  ex: repo.com/mine/go-good ==> good
-	//  ex: another.org/yours/do-no-harm/v3 ==> harm
-	for i := strings.LastIndex(name, "/"); found && i >= 0; i = strings.LastIndex(currentName, "/") {
-		saveName = currentName[i+1:]
-		currentName = currentName[:i]
-		found, _ = regexp.MatchString("v[1-9]\\d*", saveName)
-		if !found {
-			if i = strings.LastIndex(saveName, "-"); i >= 0 {
-				saveName = saveName[i+1:]
-			}
+func run(opts Options, f func(*Plugin) error) error {
+	if len(os.Args) > 1 {
+		return fmt.Errorf("unknown argument %q (this program should be run by protoc, not directly)", os.Args[1])
+	}
+	in, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	req := &pluginpb.CodeGeneratorRequest{}
+	if err = proto.Unmarshal(in, req); err != nil {
+		return err
+	}
+	gen, err := opts.New(req)
+	if err != nil {
+		return err
+	}
+	if err = f(gen); err != nil {
+		// Errors from the plugin function are reported by setting the
+		// error field in the CodeGeneratorResponse.
+		//
+		// In contrast, errors that indicate a problem in protoc
+		// itself (unparsable input, I/O errors, etc.) are reported
+		// to stderr.
+		gen.Error(err)
+	}
+	resp := gen.Response()
+	out, err := proto.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	if doDebug, ok := os.LookupEnv("PROTOC_GEN_GOTEMPLATE_DEBUG"); ok && len(doDebug) > 0 {
+		jsonOut, _ := json.MarshalIndent(resp, "", "  ")
+		_, _ = fmt.Fprintf(os.Stderr, "%s\n", jsonOut)
+	} else {
+		if _, err = os.Stdout.Write(out); err != nil {
+			return err
 		}
-	}
-
-	// Now drop the suffix
-	if i := strings.LastIndex(saveName, "."); i >= 0 {
-		saveName = saveName[0:i]
-	}
-	return saveName
-}
-
-func (tc *TemplateContext) RenderImports() string {
-	tc.impMu.Lock()
-	defer tc.impMu.Unlock()
-
-	imports := make(map[GoImportPath]GoPackageName)
-	sorted := make([]string, 0)
-	protoimports := tc.file.Desc.Imports()
-	for i := 0; i < protoimports.Len(); i = i + 1 {
-		imp := protoimports.Get(i)
-		s := imp.Path()
-		fd := tc.plugin.FilesByPath[s]
-		importPath := fd.GoImportPath
-		if importPath == tc.file.GoImportPath {
-			continue
-		}
-		if imp.IsWeak {
-			continue
-		}
-		if _, ok := imports[importPath]; ok {
-			continue
-		}
-		packageName := tc.goPackageName(importPath)
-		if _, ok := tc.usedPackages[importPath]; !ok {
-			packageName = "."
-		}
-		imports[importPath] = packageName
-	}
-	for importPath := range tc.addedImports {
-		if _, ok := imports[importPath]; ok {
-			continue
-		}
-		imports[importPath] = tc.goPackageName(importPath)
-	}
-	for k := range imports {
-		sorted = append(sorted, string(k))
-	}
-	sort.Strings(sorted)
-	buf := "import ("
-	for _, skey := range sorted {
-		importPath := GoImportPath(skey)
-		packageName := imports[importPath]
-		if string(packageName) == baseName(skey) {
-			buf = fmt.Sprintf("%s\n\t%s", buf, importPath)
-		} else {
-			buf = fmt.Sprintf("%s\n\t%s %s", buf, packageName, importPath)
-		}
-	}
-	buf = buf + "\n)"
-	return buf
-}
-
-func (tc *TemplateContext) goPackageName(importPath GoImportPath) GoPackageName {
-	if name, ok := tc.packageNames[importPath]; ok {
-		return name
-	}
-	name := cleanPackageName(baseName(string(importPath)))
-	for i, orig := 1, name; tc.usedPackageNames[name] || isGoPredeclaredIdentifier[string(name)]; i++ {
-		name = orig + GoPackageName(strconv.Itoa(i))
-	}
-	tc.packageNames[importPath] = name
-	tc.usedPackageNames[name] = true
-	return name
-}
-
-func (tc *TemplateContext) FindImport(impr string) GoPackageName {
-	tc.impMu.Lock()
-	defer tc.impMu.Unlock()
-
-	searchPath := GoImportPath(impr)
-	protoimports := tc.file.Desc.Imports()
-	for i := 0; i < protoimports.Len(); i = i + 1 {
-		imp := protoimports.Get(i)
-		s := imp.Path()
-		fd := tc.plugin.FilesByPath[s]
-		importPath := fd.GoImportPath
-		if importPath == searchPath {
-			packageName := tc.goPackageName(importPath)
-			tc.usedPackages[importPath] = true
-			return packageName
-		}
-	}
-
-	return ""
-}
-
-func (tc *TemplateContext) AddImport(i string) GoPackageName {
-	tc.impMu.Lock()
-	defer tc.impMu.Unlock()
-
-	importPath := GoImportPath(i)
-	tc.addedImports[importPath] = true
-	tc.usedPackages[importPath] = true
-	return tc.goPackageName(importPath)
-}
-
-func (tc *TemplateContext) Context() interface{} {
-	if tc.Mode == ServiceMode {
-		return tc.service
-	}
-	return tc.file
-}
-
-func (tc *TemplateContext) Package() string {
-	return goPackage(tc.Context())
-}
-
-func (tc *TemplateContext) Name() string {
-	return goName(tc.Context())
-}
-
-func (tc *TemplateContext) File() *File {
-	if tc.Mode == ServiceMode {
-		return tc.service.File
-	}
-	return tc.file
-}
-
-func (tc *TemplateContext) Service() *Service {
-	if tc.Mode == ServiceMode {
-		return tc.service
 	}
 	return nil
 }
 
-func (tc *TemplateContext) TemplateContext() *TemplateContext {
-	return getContext(tc.File().Proto.GetName())
-}
-
-type Directable interface {
-	Directives() []CommentDirective
-}
-
-func allTemplates(plug *Plugin, directable Directable) ([]template, error) {
-	templates := make([]template, 0)
+func allTemplates(plug *Plugin, directable Directable) ([]*template, error) {
+	templates := make([]*template, 0)
 	err := filepath.Walk(plug.templateDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -361,9 +149,15 @@ func allTemplates(plug *Plugin, directable Directable) ([]template, error) {
 			log.Printf("new template: %q", rel)
 		}
 
-		templates = append(templates, template{
-			fileName: rel,
-		})
+		templates = append(
+			templates,
+			newTemplate(
+				withRawFilename(rel),
+				withKind(fileTemplateKind),
+				withTemplateDir(plug.templateDir),
+			),
+		)
+
 		return nil
 	})
 	if err != nil {
@@ -371,161 +165,98 @@ func allTemplates(plug *Plugin, directable Directable) ([]template, error) {
 	}
 	for _, dir := range directable.Directives() {
 		if dir.Directive == "protoc_insert" {
-			templates = append(templates, template{
-				fileName:       dir.Params[0],
-				content:        dir.Value,
-				insertionPoint: dir.Params[1],
-			})
+			if plug.debug {
+				log.Printf("new directive template from:%s %s@%s", dir.Type.ParentFile().Path(), dir.Params[0], dir.Params[1])
+			}
+			templates = append(
+				templates,
+				newTemplate(
+					withRawFilename(dir.Params[0]),
+					withKind(directiveTemplateKind),
+					withContent(dir.Value),
+					withSource(dir.Type),
+					withTemplateDir(plug.templateDir),
+					withInsertionPoint(dir.Params[1]),
+				),
+			)
 		}
 	}
-
+	sort.Sort(templateSorter(templates))
 	return templates, nil
 }
 
-func (gen *Plugin) createContext(templateFilename string, index int, directable Directable) (*TemplateContext, error) {
-	nopt := &TemplateContext{
-		Index:            index,
-		Mode:             gen.mode,
-		RawFilename:      templateFilename,
-		plugin:           gen,
-		usedPackages:     make(map[GoImportPath]bool),
-		packageNames:     make(map[GoImportPath]GoPackageName),
-		usedPackageNames: make(map[GoPackageName]bool),
-		addedImports:     make(map[GoImportPath]bool),
-	}
-
-	switch gen.mode {
-	case AllMode:
-		nopt.file = directable.(*File)
-		nopt.service = nil
-	case ServiceMode:
-		nopt.service = directable.(*Service)
-		nopt.file = directable.(*Service).File
-	case FileMode:
-		nopt.file = directable.(*File)
-		nopt.service = nil
-	}
-	setContext(nopt)
-
-	buffer := new(bytes.Buffer)
-
-	unescaped, err := url.QueryUnescape(templateFilename)
-	if err != nil {
-		log.Printf("failed to unescape filepath %q: %v", templateFilename, err)
-	} else {
-		templateFilename = unescaped
-	}
-
-	templateFile, err := gotemplate.New("").Funcs(ProtoHelpersFuncMap).Parse(templateFilename)
-	if err != nil {
-		return nil, err
-	}
-	if err = templateFile.Execute(buffer, nopt); err != nil {
-		return nil, err
-	}
-	nopt.Filename = buffer.String()
-	return nopt, nil
-}
-
 func ProcessTemplates(gen *Plugin) {
-	directiveArray := make([]Directable, 0, len(gen.Files))
+	directableArray := make([]Directable, 0, len(gen.Files))
 	for _, f := range gen.Files {
 		switch gen.mode {
 		case AllMode:
-			directiveArray = append(directiveArray, f)
+			directableArray = append(directableArray, f)
 		case ServiceMode:
 			for _, s := range f.Services {
-				directiveArray = append(directiveArray, s)
+				directableArray = append(directableArray, s)
 			}
 		case FileMode:
 			if s := f.Services; s != nil && len(s) > 0 {
-				directiveArray = append(directiveArray, f)
+				directableArray = append(directableArray, f)
 			}
 		}
 	}
 
-	for index, dir := range directiveArray {
-		if templates, err := allTemplates(gen, dir); err != nil {
+	for index, dir := range directableArray {
+		templates, err := allTemplates(gen, dir)
+		if err != nil {
+			gen.Error(err)
 			return
-		} else {
-			templatesLen := len(templates)
-			files := make([]*GeneratedFile, 0, templatesLen)
-			errChan := make(chan error, templatesLen)
-			resultChan := make(chan *GeneratedFile, templatesLen)
-
-			for _, itemplate := range templates {
-				go func(t template) {
-					var translatedFilename, insertionPoint, filename string
-
-					if strings.Contains(t.fileName, "@") {
-						insertionPoint = t.fileName[strings.Index(t.fileName, "@")+1 : strings.Index(t.fileName, ".tmpl")]
-					}
-					if t.insertionPoint != "" {
-						insertionPoint = t.insertionPoint
-					}
-
-					cindex := gen.index
-					if cindex == -1 {
-						cindex = index
-					}
-
-					var templateContext *TemplateContext
-					templateFilename := t.fileName
-					fullPath := filepath.Join(gen.templateDir, templateFilename)
-					templateName := filepath.Base(fullPath)
-					templateFile := gotemplate.New(templateName).Funcs(ProtoHelpersFuncMap)
-
-					buffer := new(bytes.Buffer)
-
-					if t.content == "" {
-						templateFile, err = templateFile.ParseFiles(fullPath)
-					} else {
-						templateFile, err = templateFile.Parse(t.content)
-					}
-					if err != nil {
-						errChan <- err
-						return
-					}
-
-					templateContext, err = gen.createContext(templateFilename, cindex, dir)
-					if err != nil {
-						errChan <- err
-						return
-					}
-					translatedFilename = templateContext.Filename
-
-					// Remove the @<insertion point> and .tmpl from the file name
-					if len(insertionPoint) > 0 && strings.Contains(translatedFilename, "@") {
-						filename = translatedFilename[:strings.Index(translatedFilename, "@")]
-					} else {
-						filename = translatedFilename[:len(translatedFilename)-len(".tmpl")]
-					}
-
-					buffer = new(bytes.Buffer)
-
-					if err = templateFile.Execute(buffer, templateContext); err != nil {
-						errChan <- err
-						return
-					}
-
-					gf := gen.NewGeneratedFile(filename, insertionPoint, "")
-
-					_, err = gf.Write(buffer.Bytes())
-					if err != nil {
-						errChan <- err
-						return
-					}
-					resultChan <- gf
-				}(itemplate)
-			}
-
-			for i := 0; i < templatesLen; i++ {
-				select {
-				case f := <-resultChan:
-					files = append(files, f)
-				case err = <-errChan:
-					panic(err)
+		}
+		templatesLen := len(templates)
+		files := make([]*GeneratedFile, 0, templatesLen)
+		errChan := make(chan error, templatesLen)
+		resultChan := make(chan *GeneratedFile, templatesLen)
+		for _, itemplate := range templates {
+			go func(t *template) {
+				cindex := gen.index
+				if cindex == -1 {
+					cindex = index
 				}
+
+				var templateContext *TemplateContext
+				if templateContext, err = t.executeTemplate(gen.mode, cindex, dir); err != nil {
+					errChan <- err
+					return
+				}
+
+				gf := gen.NewGeneratedFile(t, templateContext)
+
+				resultChan <- gf
+			}(itemplate)
+		}
+		for i := 0; i < templatesLen; i++ {
+			select {
+			case f := <-resultChan:
+				files = append(files, f)
+			case err = <-errChan:
+				panic(err)
+			}
+		}
+	}
+	gen.genMu.Lock()
+	defer gen.genMu.Unlock()
+
+	sort.Sort(genFileSorter(gen.genFiles))
+
+	for i, curFile := range gen.genFiles {
+		if curFile.skip {
+			continue
+		}
+		for _, icurFile := range gen.genFiles[i+1:] {
+			if icurFile.skip {
+				continue
+			}
+			if curFile.fileName == icurFile.fileName && curFile.insertionPoint == icurFile.insertionPoint {
+				if len(icurFile.insertionPoint) > 0 && len(strings.Trim(string(icurFile.buf.Bytes()), " \n")) > 0 {
+					curFile.buf.Write(icurFile.buf.Bytes())
+				}
+				icurFile.Skip()
 			}
 		}
 	}
@@ -718,26 +449,6 @@ func (gen *Plugin) Response() *pluginpb.CodeGeneratorResponse {
 		return resp
 	}
 
-	gen.genMu.Lock()
-	defer gen.genMu.Unlock()
-
-	for _, i := range gen.genFiles {
-		if !i.skip {
-			continue
-		}
-		for _, g := range gen.genFiles {
-			if g.skip {
-				continue
-			}
-			if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
-				if len(g.insertionPoint) > 0 {
-					g.buf.Write(i.buf.Bytes())
-				}
-				i.Skip()
-			}
-		}
-	}
-
 	for _, g := range gen.genFiles {
 		if g.skip {
 			continue
@@ -748,7 +459,7 @@ func (gen *Plugin) Response() *pluginpb.CodeGeneratorResponse {
 				Error: proto.String(err.Error()),
 			}
 		}
-		filename := g.filename
+		filename := g.fileName
 		insertionPoint := g.insertionPoint
 		if len(insertionPoint) > 0 {
 			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
@@ -908,7 +619,7 @@ func newEnum(gen *Plugin, f *File, parent *Message, desc protoreflect.EnumDescri
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&enum.Comments, enum)
+	parseDirectives(&enum.Comments, enum.Desc)
 	gen.enumsByName[desc.FullName()] = enum
 	for i, vds := 0, enum.Desc.Values(); i < vds.Len(); i++ {
 		enum.Values = append(enum.Values, newEnumValue(gen, f, parent, enum, vds.Get(i)))
@@ -950,7 +661,7 @@ func newEnumValue(_ *Plugin, f *File, message *Message, enum *Enum, desc protore
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&enumValue.Comments, enumValue)
+	parseDirectives(&enumValue.Comments, enumValue.Desc)
 
 	return enumValue
 }
@@ -989,7 +700,7 @@ func newMessage(gen *Plugin, f *File, parent *Message, desc protoreflect.Message
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&message.Comments, message)
+	parseDirectives(&message.Comments, message.Desc)
 	gen.messagesByName[desc.FullName()] = message
 	for i, eds := 0, desc.Enums(); i < eds.Len(); i++ {
 		message.Enums = append(message.Enums, newEnum(gen, f, message, eds.Get(i)))
@@ -1164,7 +875,7 @@ func newField(_ *Plugin, f *File, message *Message, desc protoreflect.FieldDescr
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&field.Comments, field)
+	parseDirectives(&field.Comments, field.Desc)
 	return field
 }
 
@@ -1236,7 +947,7 @@ func newOneof(_ *Plugin, f *File, message *Message, desc protoreflect.OneofDescr
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&oneOf.Comments, oneOf)
+	parseDirectives(&oneOf.Comments, oneOf.Desc)
 
 	return oneOf
 }
@@ -1266,7 +977,7 @@ func newService(gen *Plugin, f *File, desc protoreflect.ServiceDescriptor) *Serv
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&service.Comments, service)
+	parseDirectives(&service.Comments, service.Desc)
 	for i, mds := 0, desc.Methods(); i < mds.Len(); i++ {
 		service.Methods = append(service.Methods, newMethod(gen, f, service, mds.Get(i)))
 	}
@@ -1301,7 +1012,7 @@ func newMethod(_ *Plugin, f *File, service *Service, desc protoreflect.MethodDes
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&method.Comments, method)
+	parseDirectives(&method.Comments, method.Desc)
 
 	return method
 }
@@ -1334,90 +1045,45 @@ func (method *Method) resolveDependencies(gen *Plugin) error {
 type GeneratedFile struct {
 	gen              *Plugin
 	skip             bool
-	filename         string
+	fileName         string
+	rawFileName      string
 	insertionPoint   string
-	goImportPath     GoImportPath
+	kind             templateKind
+	source           protoreflect.Descriptor
 	buf              bytes.Buffer
 	packageNames     map[GoImportPath]GoPackageName
 	usedPackageNames map[GoPackageName]bool
-	manualImports    map[GoImportPath]bool
-	annotations      map[string][]Location
 }
 
 // NewGeneratedFile creates a new generated file with the given filename
 // and import path.
-func (gen *Plugin) NewGeneratedFile(filename string, insertionPoint string, goImportPath GoImportPath) *GeneratedFile {
-	g := &GeneratedFile{
+func (gen *Plugin) NewGeneratedFile(t *template, tc *TemplateContext) *GeneratedFile {
+	newGenFile := &GeneratedFile{
 		gen:              gen,
-		filename:         filename,
-		goImportPath:     goImportPath,
-		insertionPoint:   insertionPoint,
-		packageNames:     make(map[GoImportPath]GoPackageName),
-		usedPackageNames: make(map[GoPackageName]bool),
-		manualImports:    make(map[GoImportPath]bool),
-		annotations:      make(map[string][]Location),
+		fileName:         t.fileName,
+		rawFileName:      t.rawFileName,
+		kind:             t.kind,
+		insertionPoint:   t.insertionPoint,
+		source:           t.source,
+		packageNames:     tc.packageNames,
+		usedPackageNames: tc.usedPackageNames,
 	}
 
 	// All predeclared identifiers in Go are already used.
 	for _, s := range types.Universe.Names() {
-		g.usedPackageNames[GoPackageName(s)] = true
+		newGenFile.usedPackageNames[GoPackageName(s)] = true
+	}
+
+	_, err := newGenFile.Write([]byte(t.content))
+	if err != nil {
+		return newGenFile
 	}
 
 	gen.genMu.Lock()
 	defer gen.genMu.Unlock()
 
-	for _, i := range gen.genFiles {
-		if i.filename == g.filename && i.insertionPoint == g.insertionPoint {
-			g.Skip()
-		}
-	}
-	gen.genFiles = append(gen.genFiles, g)
-	return g
-}
-
-// P prints a line to the generated output. It converts each parameter to a
-// string following the same rules as fmt.Print. It never inserts spaces
-// between parameters.
-func (g *GeneratedFile) P(v ...interface{}) {
-	for _, x := range v {
-		switch x := x.(type) {
-		case GoIdent:
-			_, _ = fmt.Fprint(&g.buf, g.QualifiedGoIdent(x))
-		default:
-			_, _ = fmt.Fprint(&g.buf, x)
-		}
-	}
-	_, _ = fmt.Fprintln(&g.buf)
-}
-
-// QualifiedGoIdent returns the string to use for a Go identifier.
-//
-// If the identifier is from a different Go package than the generated file,
-// the returned name will be qualified (package.name) and an import statement
-// for the identifier's package will be included in the file.
-func (g *GeneratedFile) QualifiedGoIdent(ident GoIdent) string {
-	if ident.GoImportPath == g.goImportPath {
-		return ident.GoName
-	}
-	if packageName, ok := g.packageNames[ident.GoImportPath]; ok {
-		return string(packageName) + "." + ident.GoName
-	}
-	packageName := cleanPackageName(path.Base(string(ident.GoImportPath)))
-	for i, orig := 1, packageName; g.usedPackageNames[packageName]; i++ {
-		packageName = orig + GoPackageName(strconv.Itoa(i))
-	}
-	g.packageNames[ident.GoImportPath] = packageName
-	g.usedPackageNames[packageName] = true
-	return string(packageName) + "." + ident.GoName
-}
-
-// Import ensures a package is imported by the generated file.
-//
-// Packages referenced by QualifiedGoIdent are automatically imported.
-// Explicitly importing a package with Import is generally only necessary
-// when the import will be blank (import _ "package").
-func (g *GeneratedFile) Import(importPath GoImportPath) {
-	g.manualImports[importPath] = true
+	gen.genFiles = append(gen.genFiles, newGenFile)
+	return newGenFile
 }
 
 // Write implements io.Writer.
@@ -1438,8 +1104,12 @@ func (g *GeneratedFile) Unskip() {
 
 // Content returns the contents of the generated file.
 func (g *GeneratedFile) Content() ([]byte, error) {
-	if !strings.HasSuffix(g.filename, ".go") || len(g.insertionPoint) > 0 {
+	if !strings.HasSuffix(g.fileName, ".go") {
 		return g.buf.Bytes(), nil
+	} else if len(g.insertionPoint) > 0 {
+		value := g.buf.Bytes()
+		formattedValue, _ := format.Source(value)
+		return formattedValue, nil
 	}
 
 	// Reformat generated code.
@@ -1455,7 +1125,7 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 		for line := 1; s.Scan(); line++ {
 			_, _ = fmt.Fprintf(&src, "%5d\t%s\n", line, s.Bytes())
 		}
-		return nil, fmt.Errorf("%v: unparsable Go source: %v\n%v", g.filename, err, src.String())
+		return nil, fmt.Errorf("%v: unparsable Go source: %v\n%v", g.fileName, err, src.String())
 	}
 
 	// Collect a sorted list of all imports.
@@ -1470,12 +1140,6 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 		pkgName := string(g.packageNames[importPath])
 		pkgPath := rewriteImport(string(importPath))
 		importPaths = append(importPaths, [2]string{pkgName, pkgPath})
-	}
-	for importPath := range g.manualImports {
-		if _, ok := g.packageNames[importPath]; !ok {
-			pkgPath := rewriteImport(string(importPath))
-			importPaths = append(importPaths, [2]string{"_", pkgPath})
-		}
 	}
 	sort.Slice(importPaths, func(i, j int) bool {
 		return importPaths[i][1] < importPaths[j][1]
@@ -1521,7 +1185,7 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 
 	var out bytes.Buffer
 	if err = (&printer.Config{Mode: printer.TabIndent | printer.UseSpaces, Tabwidth: 8}).Fprint(&out, fset, file); err != nil {
-		return nil, fmt.Errorf("%v: can not reformat Go source: %v", g.filename, err)
+		return nil, fmt.Errorf("%v: can not reformat Go source: %v", g.fileName, err)
 	}
 	return out.Bytes(), nil
 }
@@ -1656,7 +1320,7 @@ type CommentDirective struct {
 	Directive string
 	Params    []string
 	Value     string
-	Type      interface{}
+	Type      protoreflect.Descriptor
 }
 
 func parseExpression(re *regexp.Regexp, str string) []map[string]string {
@@ -1679,7 +1343,7 @@ func parseExpression(re *regexp.Regexp, str string) []map[string]string {
 	return paramsMap
 }
 
-func parseDirectives(c *CommentSet, parent interface{}) {
+func parseDirectives(c *CommentSet, parent protoreflect.Descriptor) {
 	processComment := func(comments ...Comments) []CommentDirective {
 		d := make([]CommentDirective, 0)
 		for _, comment := range comments {

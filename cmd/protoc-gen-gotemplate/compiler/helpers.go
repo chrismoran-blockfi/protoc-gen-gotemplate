@@ -141,6 +141,7 @@ var ProtoHelpersFuncMap = tmpl.FuncMap{
 	//"goZeroValue":                goZeroValue,
 	//"goTypeWithPackage":          goTypeWithPackage,
 	//"snakeCase":                  xstrings.ToSnakeCase,
+	"pragmaOnce":                   pragmaOnce,
 	"goName":                       goName,
 	"goMethodType":                 goMethodType,
 	"goMethodDefinition":           goMethodDefinition,
@@ -204,6 +205,15 @@ func (s *globalStore) setData(key string, o interface{}) interface{} {
 	s.store[key] = o
 	s.mu.Unlock()
 	return o
+}
+
+func pragmaOnce(o *TemplateContext) bool {
+	if d := getStore(o.RawFilename); d.(bool) {
+		return false
+	} else {
+		setStore(o.RawFilename, true)
+	}
+	return true
 }
 
 func setContext(o *TemplateContext) *TemplateContext {
@@ -525,8 +535,8 @@ func hasAnnotation(c CommentSet, str string) bool {
 
 func hasDirective(c CommentSet, str string) bool {
 	str = strings.ToLower(str)
-	for _, directive := range c.Directives {
-		dirStr := strings.ToLower(strings.Trim(directive.Directive, " \t\r\n"))
+	for _, d := range c.Directives {
+		dirStr := strings.ToLower(strings.Trim(d.Directive, " \t\r\n"))
 		if strings.HasPrefix(dirStr, str) {
 			return true
 		}
