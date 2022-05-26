@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/chrismoran-blockfi/protoc-gen-gotemplate/internal/fakestdio"
 	"io"
 	"io/ioutil"
 	"os"
@@ -37,18 +38,23 @@ func PeekStdin() ([]byte, error) {
 }
 
 func ReplaceStdin(data []byte) error {
-	pin, pout, _ := os.Pipe()
-	buf := bytes.NewBuffer(data)
-	if written, err := io.Copy(pout, buf); err != nil || written != int64(len(data)) {
-		if err != nil {
-			return err
-		}
-		return errors.New(fmt.Sprintf("buffer underwrite: %v != %v", written, len(data)))
-	}
-	if err := pout.Close(); err != nil {
+	faker, err := fakestdio.New(data)
+	if err != nil {
 		return err
 	}
-	os.Stdin = pin
-
+	faker.AutoCloseStdin()
+	/*	pin, pout, _ := os.Pipe()
+		buf := bytes.NewBuffer(data)
+		if written, err := io.Copy(pout, buf); err != nil || written != int64(len(data)) {
+			if err != nil {
+				return err
+			}
+			return errors.New(fmt.Sprintf("buffer underwrite: %v != %v", written, len(data)))
+		}
+		if err := pout.Close(); err != nil {
+			return err
+		}
+		os.Stdin = pin
+	*/
 	return nil
 }

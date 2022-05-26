@@ -1,46 +1,16 @@
 package compiler
 
 import (
-	"bytes"
-	"fmt"
-	"go/format"
-	"sort"
+	"errors"
+	"os"
+	"path"
 	"strconv"
+	"strings"
 )
 
-func (tc *TemplateContext) RenderImports() string {
+func (tc *TemplateContext) goPackageName(importPath GoImportPath) GoPackageName {
 	tc.impMu.Lock()
 	defer tc.impMu.Unlock()
-
-	imports := make(map[GoImportPath]GoPackageName)
-	sorted := make([]string, 0)
-	for importPath := range tc.addedImports {
-		if _, ok := imports[importPath]; ok {
-			continue
-		}
-		imports[importPath] = tc.goPackageName(importPath)
-	}
-	for k := range imports {
-		sorted = append(sorted, string(k))
-	}
-	sort.Strings(sorted)
-	buf := new(bytes.Buffer)
-	buf.WriteString("import (")
-	for _, skey := range sorted {
-		importPath := GoImportPath(skey)
-		packageName := imports[importPath]
-		if string(packageName) == baseName(skey) {
-			buf.WriteString(fmt.Sprintf("\n\t%s", importPath))
-		} else {
-			buf.WriteString(fmt.Sprintf("\n\t%s %s", packageName, importPath))
-		}
-	}
-	buf.WriteString("\n)")
-	buff, _ := format.Source(buf.Bytes())
-	return string(buff)
-}
-
-func (tc *TemplateContext) goPackageName(importPath GoImportPath) GoPackageName {
 	if name, ok := tc.packageNames[importPath]; ok {
 		return name
 	}
@@ -54,13 +24,32 @@ func (tc *TemplateContext) goPackageName(importPath GoImportPath) GoPackageName 
 }
 
 func (tc *TemplateContext) AddImport(i string) GoPackageName {
-	tc.impMu.Lock()
-	defer tc.impMu.Unlock()
-
 	importPath := GoImportPath(i)
-	tc.addedImports[importPath] = true
-	tc.usedPackages[importPath] = true
 	return tc.goPackageName(importPath)
+}
+
+func (tc *TemplateContext) NoClobber() bool {
+	return !tc.Clobber()
+}
+
+func (tc *TemplateContext) Clobber() bool {
+	output := path.Join(path.Dir(tc.destinationDir), tc.Filename)
+	if strings.HasSuffix(output, ".tmpl") {
+		output = output[:len(output)-len(".tmpl")]
+	}
+
+	if _, err := os.Stat(output); errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
+}
+
+func (tc *TemplateContext) GoMethodType(m *Method) string {
+	return goMethodType(tc, m)
+}
+
+func (tc *TemplateContext) GoMethodDefinition(m *Method, parameterNames ...string) string {
+	return goMethodDefinition(tc, m, parameterNames...)
 }
 
 func (tc *TemplateContext) Context() interface{} {

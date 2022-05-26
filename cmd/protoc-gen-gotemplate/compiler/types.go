@@ -2,7 +2,7 @@ package compiler
 
 import (
 	"bytes"
-	"google.golang.org/protobuf/reflect/protoreflect"
+	"go/types"
 	"google.golang.org/protobuf/types/pluginpb"
 	"log"
 	"net/url"
@@ -47,12 +47,12 @@ func (a templateSorter) Less(i, j int) bool {
 	kindCmp := int(a[i].kind) - int(a[j].kind)
 	insertionPointCmp := strings.Compare(a[i].insertionPoint, a[j].insertionPoint)
 	sourceCmp := 0
-	if a[i].source == nil {
-		sourceCmp = -1
-	} else if a[j].source == nil {
+	if len(a[i].source) == 0 && len(a[j].source) == 0 {
+		sourceCmp = 0
+	} else if len(a[i].source) == 0 {
 		sourceCmp = 1
 	} else {
-		sourceCmp = strings.Compare(a[i].source.ParentFile().Path(), a[j].source.ParentFile().Path())
+		sourceCmp = strings.Compare(a[i].source, a[j].source)
 	}
 	return fileNameCmp < 0 ||
 		fileNameCmp == 0 && kindCmp < 0 ||
@@ -94,12 +94,14 @@ func (a genFileSorter) Less(i, j int) bool {
 	kindCmp := int(a[i].kind) - int(a[j].kind)
 	insertionPointCmp := strings.Compare(a[i].insertionPoint, a[j].insertionPoint)
 	sourceCmp := 0
-	if a[i].source == nil {
+	if len(a[i].source) == 0 && len(a[j].source) == 0 {
+		sourceCmp = 0
+	} else if len(a[i].source) == 0 {
 		sourceCmp = -1
-	} else if a[j].source == nil {
+	} else if len(a[j].source) == 0 {
 		sourceCmp = 1
 	} else {
-		sourceCmp = strings.Compare(a[i].source.ParentFile().Path(), a[j].source.ParentFile().Path())
+		sourceCmp = strings.Compare(a[i].source, a[j].source)
 	}
 	return fileNameCmp < 0 ||
 		fileNameCmp == 0 && kindCmp < 0 ||
@@ -139,7 +141,7 @@ func withKind(k templateKind) templateOption {
 	}
 }
 
-func withSource(s protoreflect.Descriptor) templateOption {
+func withSource(s string) templateOption {
 	return func(t *template) {
 		t.source = s
 	}
@@ -152,11 +154,10 @@ type TemplateContext struct {
 	Filename         string `json:"filename"`
 	file             *File
 	service          *Service
+	destinationDir   string
 	impMu            sync.Mutex
 	packageNames     map[GoImportPath]GoPackageName
-	usedPackages     map[GoImportPath]bool  // Packages used in current file.
 	usedPackageNames map[GoPackageName]bool // Package names used in the current file.
-	addedImports     map[GoImportPath]bool  // Additional imports to emit.
 }
 
 type template struct {
@@ -165,7 +166,7 @@ type template struct {
 	fileName       string
 	content        string
 	insertionPoint string
-	source         protoreflect.Descriptor
+	source         string
 	kind           templateKind
 }
 
@@ -215,15 +216,18 @@ func (t *template) createTemplateFile() (*gotemplate.Template, error) {
 	return templateFile, nil
 }
 
-func (t *template) createContext(mode Mode, index int, directable Directable) (*TemplateContext, error) {
+func (t *template) createContext(mode Mode, destinationDir string, index int, directable Directable) (*TemplateContext, error) {
 	nopt := &TemplateContext{
 		Index:            index,
 		Mode:             mode,
 		RawFilename:      t.rawFileName,
-		usedPackages:     make(map[GoImportPath]bool),
+		destinationDir:   destinationDir,
 		packageNames:     make(map[GoImportPath]GoPackageName),
 		usedPackageNames: make(map[GoPackageName]bool),
-		addedImports:     make(map[GoImportPath]bool),
+	}
+
+	for _, s := range types.Universe.Names() {
+		nopt.usedPackageNames[GoPackageName(s)] = true
 	}
 
 	switch mode {
@@ -261,14 +265,14 @@ func (t *template) createContext(mode Mode, index int, directable Directable) (*
 	return nopt, nil
 }
 
-func (t *template) executeTemplate(mode Mode, index int, dir Directable) (tc *TemplateContext, err error) {
+func (t *template) executeTemplate(mode Mode, destinationDir string, index int, dir Directable) (tc *TemplateContext, err error) {
 
 	var templateFile *gotemplate.Template
 
 	if templateFile, err = t.createTemplateFile(); err != nil {
 		return tc, err
 	}
-	if tc, err = t.createContext(mode, index, dir); err != nil {
+	if tc, err = t.createContext(mode, destinationDir, index, dir); err != nil {
 		return tc, err
 	}
 

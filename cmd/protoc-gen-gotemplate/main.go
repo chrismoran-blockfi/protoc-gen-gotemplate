@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/pluginpb"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -30,15 +31,34 @@ func main() {
 		}
 		_ = os.Setenv("PROTOC_GEN_GOTEMPLATE_DEBUG", "true")
 		os.Args = []string{os.Args[0]}
-	} else if doDebug, ok := os.LookupEnv("PROTOC_GEN_GOTEMPLATE_DEBUGFILE"); ok && len(doDebug) > 0 {
+	} else if doDebug, ok := os.LookupEnv("PROTOC_GEN_GOTEMPLATE_DEBUGFILE"); ok && len(doDebug) == 0 {
+		var data []byte
+		var err error
+		if data, err = ioutil.ReadAll(os.Stdin); err != nil {
+			panic(err)
+		}
+		req := &pluginpb.CodeGeneratorRequest{}
+		_ = proto.Unmarshal(data, req)
+		log.Println("protoc-gen-gotemplate unmarshaling...")
+		jdata, _ := json.MarshalIndent(req, "", "  ")
+		log.Println("protoc-gen-gotemplate saving request...")
+		_ = ioutil.WriteFile("req.json", jdata, 0644)
+		log.Println("protoc-gen-gotemplate finished saving request... exiting")
+		os.Exit(1)
+	} else if len(doDebug) > 0 {
+		log.Println("protoc-gen-gotemplate peeking...")
 		data, err := intio.PeekStdin()
+		log.Println("protoc-gen-gotemplate stdin peeked...")
 		if err != nil {
 			panic(err)
 		}
 		req := &pluginpb.CodeGeneratorRequest{}
 		_ = proto.Unmarshal(data, req)
+		log.Println("protoc-gen-gotemplate unmarshaling...")
 		jdata, _ := json.MarshalIndent(req, "", "  ")
+		log.Println("protoc-gen-gotemplate saving request...")
 		_ = ioutil.WriteFile(doDebug, jdata, 0644)
+		log.Println("protoc-gen-gotemplate finished saving request...")
 	}
 
 	var (

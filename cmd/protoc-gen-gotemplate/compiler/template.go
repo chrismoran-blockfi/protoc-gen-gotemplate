@@ -16,7 +16,6 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"go/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -32,7 +31,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // A Plugin is a protoc plugin invocation.
@@ -59,7 +57,6 @@ type Plugin struct {
 	mode           Mode
 	index          int
 	debug          bool
-	genMu          sync.Mutex
 	genFiles       []*GeneratedFile
 	opts           Options
 	err            error
@@ -100,6 +97,7 @@ func run(opts Options, f func(*Plugin) error) error {
 	if err = proto.Unmarshal(in, req); err != nil {
 		return err
 	}
+	sort.Strings(req.FileToGenerate)
 	gen, err := opts.New(req)
 	if err != nil {
 		return err
@@ -120,7 +118,7 @@ func run(opts Options, f func(*Plugin) error) error {
 	}
 	if doDebug, ok := os.LookupEnv("PROTOC_GEN_GOTEMPLATE_DEBUG"); ok && len(doDebug) > 0 {
 		jsonOut, _ := json.MarshalIndent(resp, "", "  ")
-		_, _ = fmt.Fprintf(os.Stderr, "%s\n", jsonOut)
+		_ = ioutil.WriteFile("resp.json", jsonOut, 0644)
 	} else {
 		if _, err = os.Stdout.Write(out); err != nil {
 			return err
@@ -166,7 +164,7 @@ func allTemplates(plug *Plugin, directable Directable) ([]*template, error) {
 	for _, dir := range directable.Directives() {
 		if dir.Directive == "protoc_insert" {
 			if plug.debug {
-				log.Printf("new directive template from:%s %s@%s", dir.Type.ParentFile().Path(), dir.Params[0], dir.Params[1])
+				log.Printf("new directive template from:%s %s@%s", dir.Source, dir.Params[0], dir.Params[1])
 			}
 			templates = append(
 				templates,
@@ -174,7 +172,7 @@ func allTemplates(plug *Plugin, directable Directable) ([]*template, error) {
 					withRawFilename(dir.Params[0]),
 					withKind(directiveTemplateKind),
 					withContent(dir.Value),
-					withSource(dir.Type),
+					withSource(dir.Source),
 					withTemplateDir(plug.templateDir),
 					withInsertionPoint(dir.Params[1]),
 				),
@@ -209,7 +207,6 @@ func ProcessTemplates(gen *Plugin) {
 			return
 		}
 		templatesLen := len(templates)
-		files := make([]*GeneratedFile, 0, templatesLen)
 		errChan := make(chan error, templatesLen)
 		resultChan := make(chan *GeneratedFile, templatesLen)
 		for _, itemplate := range templates {
@@ -220,7 +217,7 @@ func ProcessTemplates(gen *Plugin) {
 				}
 
 				var templateContext *TemplateContext
-				if templateContext, err = t.executeTemplate(gen.mode, cindex, dir); err != nil {
+				if templateContext, err = t.executeTemplate(gen.mode, gen.destinationDir, cindex, dir); err != nil {
 					errChan <- err
 					return
 				}
@@ -233,15 +230,12 @@ func ProcessTemplates(gen *Plugin) {
 		for i := 0; i < templatesLen; i++ {
 			select {
 			case f := <-resultChan:
-				files = append(files, f)
+				gen.genFiles = append(gen.genFiles, f)
 			case err = <-errChan:
 				panic(err)
 			}
 		}
 	}
-	gen.genMu.Lock()
-	defer gen.genMu.Unlock()
-
 	sort.Sort(genFileSorter(gen.genFiles))
 
 	for i, curFile := range gen.genFiles {
@@ -253,7 +247,7 @@ func ProcessTemplates(gen *Plugin) {
 				continue
 			}
 			if curFile.fileName == icurFile.fileName && curFile.insertionPoint == icurFile.insertionPoint {
-				if len(icurFile.insertionPoint) > 0 && len(strings.Trim(string(icurFile.buf.Bytes()), " \n")) > 0 {
+				if len(icurFile.insertionPoint) > 0 && len(strings.Trim(string(icurFile.buf.Bytes()), " \r\n\t")) > 0 {
 					curFile.buf.Write(icurFile.buf.Bytes())
 				}
 				icurFile.Skip()
@@ -544,24 +538,16 @@ func newFile(gen *Plugin, p *descriptorpb.FileDescriptorProto, packageName GoPac
 	f.GeneratedFilenamePrefix = prefix
 
 	for i, eds := 0, desc.Enums(); i < eds.Len(); i++ {
-		enum := newEnum(gen, f, nil, eds.Get(i))
-		f.Enums = append(f.Enums, enum)
-		f.directives = append(f.directives, enum.Directives()...)
+		f.Enums = append(f.Enums, newEnum(gen, f, nil, eds.Get(i)))
 	}
 	for i, mds := 0, desc.Messages(); i < mds.Len(); i++ {
-		message := newMessage(gen, f, nil, mds.Get(i))
-		f.Messages = append(f.Messages, message)
-		f.directives = append(f.directives, message.Directives()...)
+		f.Messages = append(f.Messages, newMessage(gen, f, nil, mds.Get(i)))
 	}
 	for i, xds := 0, desc.Extensions(); i < xds.Len(); i++ {
-		field := newField(gen, f, nil, xds.Get(i))
-		f.Extensions = append(f.Extensions, field)
-		f.directives = append(f.directives, field.Directives()...)
+		f.Extensions = append(f.Extensions, newField(gen, f, nil, xds.Get(i)))
 	}
 	for i, sds := 0, desc.Services(); i < sds.Len(); i++ {
-		service := newService(gen, f, sds.Get(i))
-		f.Services = append(f.Services, service)
-		f.directives = append(f.directives, service.Directives()...)
+		f.Services = append(f.Services, newService(gen, f, sds.Get(i)))
 	}
 	for _, message := range f.Messages {
 		if err = message.resolveDependencies(gen); err != nil {
@@ -619,7 +605,8 @@ func newEnum(gen *Plugin, f *File, parent *Message, desc protoreflect.EnumDescri
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&enum.Comments, enum.Desc)
+	parseDirectives(&enum.Comments, enum, enum.Desc.ParentFile().Path())
+	f.directives = append(f.directives, enum.Directives()...)
 	gen.enumsByName[desc.FullName()] = enum
 	for i, vds := 0, enum.Desc.Values(); i < vds.Len(); i++ {
 		enum.Values = append(enum.Values, newEnumValue(gen, f, parent, enum, vds.Get(i)))
@@ -661,7 +648,7 @@ func newEnumValue(_ *Plugin, f *File, message *Message, enum *Enum, desc protore
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&enumValue.Comments, enumValue.Desc)
+	parseDirectives(&enumValue.Comments, enumValue, enumValue.Desc.ParentFile().Path())
 
 	return enumValue
 }
@@ -700,7 +687,8 @@ func newMessage(gen *Plugin, f *File, parent *Message, desc protoreflect.Message
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&message.Comments, message.Desc)
+	parseDirectives(&message.Comments, message, message.Desc.ParentFile().Path())
+	f.directives = append(f.directives, message.Directives()...)
 	gen.messagesByName[desc.FullName()] = message
 	for i, eds := 0, desc.Enums(); i < eds.Len(); i++ {
 		message.Enums = append(message.Enums, newEnum(gen, f, message, eds.Get(i)))
@@ -810,8 +798,8 @@ func (message *Message) resolveDependencies(gen *Plugin) error {
 			return err
 		}
 	}
-	for _, message := range message.Messages {
-		if err := message.resolveDependencies(gen); err != nil {
+	for _, msg := range message.Messages {
+		if err := msg.resolveDependencies(gen); err != nil {
 			return err
 		}
 	}
@@ -875,7 +863,8 @@ func newField(_ *Plugin, f *File, message *Message, desc protoreflect.FieldDescr
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&field.Comments, field.Desc)
+	parseDirectives(&field.Comments, field, field.Desc.ParentFile().Path())
+	f.directives = append(f.directives, field.Directives()...)
 	return field
 }
 
@@ -947,7 +936,7 @@ func newOneof(_ *Plugin, f *File, message *Message, desc protoreflect.OneofDescr
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&oneOf.Comments, oneOf.Desc)
+	parseDirectives(&oneOf.Comments, oneOf, oneOf.Desc.ParentFile().Path())
 
 	return oneOf
 }
@@ -977,9 +966,10 @@ func newService(gen *Plugin, f *File, desc protoreflect.ServiceDescriptor) *Serv
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&service.Comments, service.Desc)
+	parseDirectives(&service.Comments, service, service.Desc.ParentFile().Path())
 	for i, mds := 0, desc.Methods(); i < mds.Len(); i++ {
 		service.Methods = append(service.Methods, newMethod(gen, f, service, mds.Get(i)))
+		f.directives = append(f.directives, service.Directives()...)
 	}
 	return service
 }
@@ -1012,7 +1002,7 @@ func newMethod(_ *Plugin, f *File, service *Service, desc protoreflect.MethodDes
 		Location: loc,
 		Comments: makeCommentSet(f.Desc.SourceLocations().ByDescriptor(desc)),
 	}
-	parseDirectives(&method.Comments, method.Desc)
+	parseDirectives(&method.Comments, method, method.Desc.ParentFile().Path())
 
 	return method
 }
@@ -1043,46 +1033,39 @@ func (method *Method) resolveDependencies(gen *Plugin) error {
 
 // A GeneratedFile is a generated file.
 type GeneratedFile struct {
-	gen              *Plugin
-	skip             bool
-	fileName         string
-	rawFileName      string
-	insertionPoint   string
-	kind             templateKind
-	source           protoreflect.Descriptor
-	buf              bytes.Buffer
-	packageNames     map[GoImportPath]GoPackageName
-	usedPackageNames map[GoPackageName]bool
+	gen            *Plugin
+	skip           bool
+	fileName       string
+	rawFileName    string
+	insertionPoint string
+	kind           templateKind
+	source         string
+	buf            bytes.Buffer
+	packageNames   map[GoImportPath]GoPackageName
 }
 
 // NewGeneratedFile creates a new generated file with the given filename
 // and import path.
 func (gen *Plugin) NewGeneratedFile(t *template, tc *TemplateContext) *GeneratedFile {
 	newGenFile := &GeneratedFile{
-		gen:              gen,
-		fileName:         t.fileName,
-		rawFileName:      t.rawFileName,
-		kind:             t.kind,
-		insertionPoint:   t.insertionPoint,
-		source:           t.source,
-		packageNames:     tc.packageNames,
-		usedPackageNames: tc.usedPackageNames,
+		gen:            gen,
+		fileName:       t.fileName,
+		rawFileName:    t.rawFileName,
+		kind:           t.kind,
+		insertionPoint: t.insertionPoint,
+		source:         t.source,
+		packageNames:   tc.packageNames,
 	}
 
-	// All predeclared identifiers in Go are already used.
-	for _, s := range types.Universe.Names() {
-		newGenFile.usedPackageNames[GoPackageName(s)] = true
+	if len(t.content) > 0 {
+		_, err := newGenFile.Write([]byte(t.content))
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		newGenFile.Skip()
 	}
 
-	_, err := newGenFile.Write([]byte(t.content))
-	if err != nil {
-		return newGenFile
-	}
-
-	gen.genMu.Lock()
-	defer gen.genMu.Unlock()
-
-	gen.genFiles = append(gen.genFiles, newGenFile)
 	return newGenFile
 }
 
@@ -1108,7 +1091,13 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 		return g.buf.Bytes(), nil
 	} else if len(g.insertionPoint) > 0 {
 		value := g.buf.Bytes()
-		formattedValue, _ := format.Source(value)
+		formattedValue, err := format.Source(value)
+		if err != nil {
+			if g.gen.debug {
+				log.Printf("Could not format source:\nFile: %s@%s\nContents:\n*****\n%s\n*****\n", g.fileName, g.insertionPoint, string(value))
+			}
+			return value, nil
+		}
 		return formattedValue, nil
 	}
 
@@ -1139,6 +1128,9 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 	for importPath := range g.packageNames {
 		pkgName := string(g.packageNames[importPath])
 		pkgPath := rewriteImport(string(importPath))
+		if baseName(pkgPath) == pkgName {
+			pkgName = ""
+		}
 		importPaths = append(importPaths, [2]string{pkgName, pkgPath})
 	}
 	sort.Slice(importPaths, func(i, j int) bool {
@@ -1167,11 +1159,15 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 			Rparen: pos,
 		}
 		for _, importPath := range importPaths {
-			impDecl.Specs = append(impDecl.Specs, &ast.ImportSpec{
-				Name: &ast.Ident{
+			var name *ast.Ident
+			if len(importPath[0]) > 0 {
+				name = &ast.Ident{
 					Name:    importPath[0],
 					NamePos: pos,
-				},
+				}
+			}
+			impDecl.Specs = append(impDecl.Specs, &ast.ImportSpec{
+				Name: name,
 				Path: &ast.BasicLit{
 					Kind:     token.STRING,
 					Value:    strconv.Quote(importPath[1]),
@@ -1320,7 +1316,8 @@ type CommentDirective struct {
 	Directive string
 	Params    []string
 	Value     string
-	Type      protoreflect.Descriptor
+	Source    string
+	Type      interface{}
 }
 
 func parseExpression(re *regexp.Regexp, str string) []map[string]string {
@@ -1343,7 +1340,7 @@ func parseExpression(re *regexp.Regexp, str string) []map[string]string {
 	return paramsMap
 }
 
-func parseDirectives(c *CommentSet, parent protoreflect.Descriptor) {
+func parseDirectives(c *CommentSet, parent interface{}, source string) {
 	processComment := func(comments ...Comments) []CommentDirective {
 		d := make([]CommentDirective, 0)
 		for _, comment := range comments {
@@ -1357,6 +1354,7 @@ func parseDirectives(c *CommentSet, parent protoreflect.Descriptor) {
 					Directive: mapping[match]["directive"],
 					Params:    strings.Split(mapping[match]["params"], ", "),
 					Value:     mapping[match]["value"],
+					Source:    source,
 					Type:      parent,
 				})
 			}

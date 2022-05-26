@@ -18,13 +18,14 @@ type FakeStdio struct {
 	origStdout   *os.File
 	stdoutReader *os.File
 
+	inCh  chan bool
 	outCh chan []byte
 
 	origStdin   *os.File
 	stdinWriter *os.File
 }
 
-func New(stdinText string) (*FakeStdio, error) {
+func New(stdinText []byte) (*FakeStdio, error) {
 	// Pipe for stdin.
 	//
 	//                 ======
@@ -48,12 +49,18 @@ func New(stdinText string) (*FakeStdio, error) {
 	origStdin := os.Stdin
 	os.Stdin = stdinReader
 
-	_, err = stdinWriter.Write([]byte(stdinText))
-	if err != nil {
-		stdinWriter.Close()
-		os.Stdin = origStdin
-		return nil, err
-	}
+	inCh := make(chan bool)
+	go func() {
+		_, err = stdinWriter.Write(stdinText)
+		if err != nil {
+			_ = stdinWriter.Close()
+			os.Stdin = origStdin
+			inCh <- false
+			return
+		}
+
+		inCh <- true
+	}()
 
 	origStdout := os.Stdout
 	os.Stdout = stdoutWriter
@@ -72,6 +79,7 @@ func New(stdinText string) (*FakeStdio, error) {
 	return &FakeStdio{
 		origStdout:   origStdout,
 		stdoutReader: stdoutReader,
+		inCh:         inCh,
 		outCh:        outCh,
 		origStdin:    origStdin,
 		stdinWriter:  stdinWriter,
@@ -82,9 +90,17 @@ func New(stdinText string) (*FakeStdio, error) {
 // logic for reading stdin until EOF; otherwise such code would block forever.
 func (sf *FakeStdio) CloseStdin() {
 	if sf.stdinWriter != nil {
-		sf.stdinWriter.Close()
+		_ = sf.stdinWriter.Close()
 		sf.stdinWriter = nil
 	}
+}
+
+func (sf *FakeStdio) AutoCloseStdin() {
+	go func() {
+		_ = <-sf.inCh
+
+		sf.CloseStdin()
+	}()
 }
 
 // ReadAndRestore collects all captured stdout and returns it; it also restores
@@ -96,19 +112,19 @@ func (sf *FakeStdio) ReadAndRestore() ([]byte, error) {
 
 	// Close the writer side of the faked stdout pipe. This signals to the
 	// background goroutine that it should exit.
-	os.Stdout.Close()
+	_ = os.Stdout.Close()
 	out := <-sf.outCh
 
 	os.Stdout = sf.origStdout
 	os.Stdin = sf.origStdin
 
 	if sf.stdoutReader != nil {
-		sf.stdoutReader.Close()
+		_ = sf.stdoutReader.Close()
 		sf.stdoutReader = nil
 	}
 
 	if sf.stdinWriter != nil {
-		sf.stdinWriter.Close()
+		_ = sf.stdinWriter.Close()
 		sf.stdinWriter = nil
 	}
 
